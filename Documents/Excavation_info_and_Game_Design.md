@@ -15,7 +15,7 @@
 
 ### Grave Depth
 
-![[Pasted image 20260130160316.png]]
+![Grave Depth](Pasted%20image%2020260130160316.png)
 
 - Do old graves tend to be shallow?
 ### Skeleton resting position *(is important)*
@@ -29,7 +29,7 @@
 
 - Skeleton form gets flat over time?
   *might be very hard to implement* 
-![[Pasted image 20260131135208.png]]
+![Skeleton Position](Pasted%20image%2020260131135208.png)
 
 ### Degradation
 #### Clothing
@@ -169,9 +169,10 @@ Grave back-filling is the process of refilling an excavated grave with the prev
 - **Archaeological Evidence:** In archaeological contexts, the fill is often identified by changes in soil color or texture, indicating that the soil has been previously disturbed.
 - **Process:** During excavation, the boundary is identified as the edge of the pit, and maintaining the integrity of this wall is essential for proper stratigraphic recording.
 
-![[Pasted image 20260131140010.png|600]]
- ![[Pasted image 20260131183804.png|600]]
-![[Pasted image 20260131142552.png|400]]![[Pasted image 20260131142755.png|400]]
+![Grave-fill Boundary 1](Pasted%20image%2020260131140010.png)
+![Grave-fill Boundary 2](Pasted%20image%2020260131183804.png)
+![Grave-fill Boundary 3](Pasted%20image%2020260131142552.png)
+![Grave-fill Boundary 4](Pasted%20image%2020260131142755.png)
 ### Player agency and expression
 
 We need to be very conscious of the conflict between player agency/expression and the educational goals of the game. A bit of leeway in player choice will enhance engagement, therefore, evaluating *when* to allow this, and to dutifully inform the player of each case, is important.
@@ -184,13 +185,13 @@ We need to be very conscious of the conflict between player agency/expression an
 - very atmospheric skybox
 
 
-[![[Pasted image 20260130165610.png|500]]
+![Art Style Reference](Pasted%20image%2020260130165610.png)
 
-[[https://www.youtube.com/watch?v=Gb1fvEwkmTA]]
+[YouTube Reference](https://www.youtube.com/watch?v=Gb1fvEwkmTA)
 
 ### Gamification
 
-![[Pasted image 20260130155342.png|500]]
+![Gamification](Pasted%20image%2020260130155342.png)
 
 - leaderboard.
 - excavation-results sharing | end-game or per grave.
