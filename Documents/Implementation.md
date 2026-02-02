@@ -28,15 +28,15 @@ This means a coarse voxel grid can produce **smooth, curved surfaces** with no e
 ### Core Composition Rule
 
 ```
-Scene(p) = max(Base(p), -Carve(p))
+Scene(p) = max(Base(p), -CarveMask(p))
 ```
 - `Base(p)` — the original, unexcavated ground SDF (e.g., `-p.y` for flat ground at y=0)
-- `Carve(p)` — the carve depth at this point, derived from the density texture
+- `CarveMask(p)` — the excavation SDF sampled from the 3D texture (0 = untouched, positive = carved)
 - **Positive** = outside surface (air), **Negative** = inside solid
 
 ---
 
-### 3D Carve Volume
+### 3D Carve Mask
 
 #### Configuration
 
@@ -96,13 +96,34 @@ When the player digs at position `center` with tool radius `r`:
      ```csharp
      // Convert penetration depth to a density reduction
      float penetration = -d;  // Positive value indicating how far inside
-     float reduction = saturate(penetration / maxCarveDepth);
+     float reduction = saturate(penetration / maxBrushPenetration);
      
      // Reduce density (0 = fully carved, 1 = solid)
-     density[voxel] = min(density[voxel], 1.0 - reduction);
+     carveMask[voxel] = min(carveMask[voxel], 1.0 - reduction);
      ```
 
 The deeper inside the brush, the lower the density becomes. Voxels at the brush edge get partial values, which the GPU interpolates into smooth surfaces.
+
+#### Caveat: Carving in Air
+
+The brush writes to **all** voxels it touches, including those above the base terrain (i.e., in air). This data is harmless in most cases — the scene evaluation uses `max(baseSDF, -carveMaskSDF)`, so carving air has no visible effect.
+
+However, be aware of these edge cases:
+
+- **Union layers added later:** If you carve in air, then later add a burial mound (Union operation) that occupies that space, the mound will have an unexpected hole from the earlier carve.
+- **Wasted writes:** Large brushes mostly in air do unnecessary work. Negligible for small brushes.
+- **Save file size:** Carved regions (non-255 values) compress less efficiently.
+
+If these become problems, add a check before writing:
+
+```csharp
+if (EvaluateBase(voxelPos) < 0)  // Only carve inside solid ground
+{
+    carveMask[voxel] = min(carveMask[voxel], 1.0 - reduction);
+}
+```
+
+For now, the simpler approach (carve everything, ignore the harmless data) is recommended.
 
 #### GPU vs CPU
 
@@ -120,20 +141,21 @@ Recommended: implement CPU first, profile, then port to compute if needed.
 To query the final surface at any point `p`:
 
 ```csharp
-float EvaluateScene(Vector3 p, CarveVolumeSettings settings, Texture3D carveVolume)
+float EvaluateScene(Vector3 p, CarveVolumeSettings settings, Texture3D carveMask)
 {
     float baseSDF = EvaluateBase(p);               // e.g., -p.y for flat ground at y=0
     
     Vector3 uv = WorldToUV(p, settings);
     if (OutOfBounds(uv)) return baseSDF;           // Outside excavation zone
     
-    // Sample density (GPU interpolates automatically via trilinear filtering)
-    float density = carveVolume.SampleLevel(uv, 0);  // Returns 0.0–1.0
+    // Sample the carve mask (GPU interpolates automatically via trilinear filtering)
+    // 1.0 = untouched solid, 0.0 = fully excavated
+    float maskDensity = carveMask.SampleLevel(uv, 0);
     
-    // Convert density to carve depth: 1.0 = no carve, 0.0 = max carve
-    float carveDepth = (1.0 - density) * maxCarveDepth;
+    // Convert to an SDF: 0 when untouched, positive when carved
+    float carveMaskSDF = (1.0 - maskDensity) * maxExcavationDepth;
     
-    return Mathf.Max(baseSDF, -carveDepth);
+    return Mathf.Max(baseSDF, -carveMaskSDF);
 }
 ```
 
@@ -208,6 +230,39 @@ MaterialLayer EvaluateMaterial(Vector3 p)
 
 ---
 
+### Base Terrain Evaluation
+
+The base terrain SDF is modified by any layers using `Union` or `Subtract` operations:
+
+```csharp
+float EvaluateBase(Vector3 p)
+{
+    float sdf = baseGround.SDF(p);  // e.g., -p.y for flat ground
+    
+    foreach (var layer in layers)
+    {
+        float layerSDF = layer.geometry.SDF(p);
+        
+        switch (layer.geometry.operation)
+        {
+            case LayerOperation.Union:
+                sdf = Mathf.Min(sdf, layerSDF);    // Add material
+                break;
+            case LayerOperation.Subtract:
+                sdf = Mathf.Max(sdf, -layerSDF);   // Remove material
+                break;
+            // LayerOperation.Inside doesn't modify base — handled in EvaluateMaterial
+        }
+    }
+    
+    return sdf;
+}
+```
+
+Most layers use `Inside` (default) and only define material regions within the existing terrain. `Union` adds geometry (burial mounds), `Subtract` removes it (modern service trenches).
+
+---
+
 ### Layer Definition
 
 Each layer is defined by a **signed distance function** or a **depth band**:
@@ -225,8 +280,16 @@ public class MaterialLayer
     public LayerGeometry geometry;
 }
 
+public enum LayerOperation
+{
+    Inside,     // AND — only exists within base terrain (default)
+    Union,      // OR  — adds to base terrain (mounds, spoil heaps)
+    Subtract    // XOR — cuts through everything (modern trench, pipe)
+}
+
 public abstract class LayerGeometry
 {
+    public LayerOperation operation = LayerOperation.Inside;
     public abstract float SDF(Vector3 p);            // Negative = inside
     public bool Contains(Vector3 p) => SDF(p) < 0;
 }
@@ -337,7 +400,7 @@ Pass the layer result to the raymarch shader:
 
 | Component | Storage | Update Frequency |
 |-----------|---------|------------------|
-| Carve volume | 3D texture (R8), ~4 MB | Per dig stroke |
+| Carve mask | 3D texture (R8), ~4 MB | Per dig stroke |
 | Base SDF | Analytical function | Static |
 | Material layers | Analytical functions | Static (authored) |
 | Surface render | Raymarch shader | Per frame |
