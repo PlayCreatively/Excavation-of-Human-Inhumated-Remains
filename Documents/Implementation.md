@@ -4,15 +4,35 @@
 
 ### Overview
 
-The excavation system uses a **Signed Distance Field (SDF)** to represent the terrain surface. Player carving is stored in a **3D texture** (baked volume) that records how much material has been removed at each point.
+The excavation system uses a **Signed Distance Field (SDF)** to represent the terrain surface. Player carving is stored in a **3D texture** (baked volume) where each voxel holds a **density value** representing how solid that point is.
 
-**Core composition rule:**
+### Key Concept: Density & Hardware Filtering
+
+Each voxel stores a value from 0 to 1:
+- **0** = Fully excavated (air)
+- **1** = Fully solid (untouched ground)
+- **0.01–0.99** = Partial values at carved edges
+
+**Why this works:** When sampling the 3D texture using normalized UV coordinates, the GPU's **trilinear filtering** automatically interpolates between neighbouring voxels. We define an **isosurface threshold** (typically 0.5)—the surface appears wherever the interpolated density crosses this threshold.
+
+```
+Voxel A: 1.0 (solid)    Voxel B: 0.2 (mostly carved)
+         |——————————————————|
+              ↑
+         Isosurface at 0.5 appears here
+         (closer to A, because B's value is lower)
+```
+
+This means a coarse voxel grid can produce **smooth, curved surfaces** with no extra code—exploiting what GPUs already do with texture filtering, but interpreting the result as geometry.
+
+### Core Composition Rule
+
 ```
 Scene(p) = max(Base(p), -Carve(p))
 ```
-- `Base(p)` — the original, unexcavated ground SDF (e.g., a flat plane or gentle terrain)
-- `Carve(p)` — the accumulated excavation depth, sampled from the 3D texture
-- Positive = outside surface, Negative = inside solid
+- `Base(p)` — the original, unexcavated ground SDF (e.g., `-p.y` for flat ground at y=0)
+- `Carve(p)` — the carve depth at this point, derived from the density texture
+- **Positive** = outside surface (air), **Negative** = inside solid
 
 ---
 
@@ -25,7 +45,7 @@ Scene(p) = max(Base(p), -Carve(p))
 public class CarveVolumeSettings
 {
     public Vector3 worldOrigin = Vector3.zero;      // Corner of the excavation bounds
-    public Vector3 worldSize = new Vector3(10, 5, 10); // 10m x 5m x 10m
+    public Vector3 worldSize = new Vector3(10, 5, 10); // 10m × 5m × 10m
     public float voxelSize = 0.05f;                 // 5 cm resolution (adjustable)
 }
 ```
@@ -38,11 +58,13 @@ Derived values:
 
 | Option | Precision | Notes |
 |--------|-----------|-------|
-| `R8_UNorm` | 256 depth levels | Lightweight; map 0–1 to max carve depth (e.g., 2 m) |
-| `R16_UNorm` | 65 k levels | Higher precision if needed |
+| `R8_UNorm` | 256 levels | Lightweight; values 0–255 map to density 0.0–1.0 |
+| `R16_UNorm` | 65k levels | Higher precision if needed |
 | `R32_SFloat` | Full float | Overkill for most cases |
 
 Start with **R8** (1 byte); upgrade if banding artifacts appear.
+
+**Important:** Use `FilterMode.Trilinear` on the texture to enable hardware interpolation.
 
 #### Coordinate Mapping
 
@@ -53,7 +75,7 @@ Vector3 WorldToUV(Vector3 worldPos, CarveVolumeSettings s)
     return (worldPos - s.worldOrigin) / s.worldSize;
 }
 
-// UV → voxel index
+// UV → voxel index (for direct writes)
 Vector3Int UVToVoxel(Vector3 uv, Vector3Int resolution)
 {
     return Vector3Int.FloorToInt(uv * resolution);
@@ -70,11 +92,17 @@ When the player digs at position `center` with tool radius `r`:
 2. For each voxel in that box:
    - Compute world position of voxel centre.
    - Evaluate sphere SDF: `d = length(voxelPos - center) - r`
-   - If `d < 0` (inside sphere), update the carve texture:
+   - If `d < 0` (inside sphere), reduce the density:
+     ```csharp
+     // Convert penetration depth to a density reduction
+     float penetration = -d;  // Positive value indicating how far inside
+     float reduction = saturate(penetration / maxCarveDepth);
+     
+     // Reduce density (0 = fully carved, 1 = solid)
+     density[voxel] = min(density[voxel], 1.0 - reduction);
      ```
-     carve[voxel] = max(carve[voxel], -d)
-     ```
-     This records the deepest penetration.
+
+The deeper inside the brush, the lower the density becomes. Voxels at the brush edge get partial values, which the GPU interpolates into smooth surfaces.
 
 #### GPU vs CPU
 
@@ -99,7 +127,12 @@ float EvaluateScene(Vector3 p, CarveVolumeSettings settings, Texture3D carveVolu
     Vector3 uv = WorldToUV(p, settings);
     if (OutOfBounds(uv)) return baseSDF;           // Outside excavation zone
     
-    float carveDepth = SampleCarveVolume(carveVolume, uv) * maxCarveDepth;
+    // Sample density (GPU interpolates automatically via trilinear filtering)
+    float density = carveVolume.SampleLevel(uv, 0);  // Returns 0.0–1.0
+    
+    // Convert density to carve depth: 1.0 = no carve, 0.0 = max carve
+    float carveDepth = (1.0 - density) * maxCarveDepth;
+    
     return Mathf.Max(baseSDF, -carveDepth);
 }
 ```
@@ -150,7 +183,7 @@ void LoadCarveVolume(Texture3D volume, byte[] compressed)
 }
 ```
 
-At 5 cm / R8, uncompressed is ~4 MB; compresses well when mostly unexcavated.
+At R8, uncompressed is ~4 MB; compresses well when mostly unexcavated (lots of 255s; compressed using run-length encoding).
 
 ---
 
@@ -271,7 +304,7 @@ List<MaterialLayer> layers = new List<MaterialLayer>
     cut_001,    // The pit cut (void if reached, but fill covers it)
     topsoil,
     subsoil,
-    naturalCite // Oldest
+    natural     // Oldest
 };
 ```
 
@@ -309,4 +342,3 @@ Pass the layer result to the raymarch shader:
 | Material layers | Analytical functions | Static (authored) |
 | Surface render | Raymarch shader | Per frame |
 | Collision | SDF samples / sphere-trace | Per physics tick |
-
