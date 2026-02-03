@@ -4,35 +4,25 @@
 
 ### Overview
 
-The excavation system uses a **Signed Distance Field (SDF)** to represent the terrain surface. Player carving is stored in a **3D texture** (baked volume) where each voxel holds a **density value** representing how solid that point is.
+The excavation system uses a **Signed Distance Field (SDF)** to represent the terrain surface. The 3D texture stores the **actual distance** to the nearest excavated surface in world units.
 
-### Key Concept: Density & Hardware Filtering
+### Key Concept: Texture-Based SDF
 
-Each voxel stores a value from 0 to 1:
-- **0** = Fully excavated (air)
-- **1** = Fully solid (untouched ground)
-- **0.01–0.99** = Partial values at carved edges
+Each voxel stores a **Signed Distance**:
+- **Negative (< 0):** Inside the "Carve Volume" (Air/Excavated).
+- **Positive (> 0):** Outside the "Carve Volume" (Solid Ground).
+- **Zero (0):** The exact surface boundary.
 
-**Why this works:** When sampling the 3D texture using normalized UV coordinates, the GPU's **trilinear filtering** automatically interpolates between neighbouring voxels. We define an **isosurface threshold** (typically 0.5)—the surface appears wherever the interpolated density crosses this threshold.
+**The "Blindness" Problem:**
+A raw texture is blind in empty space. If a voxel says "distance = -5.0", it knows you are 5m inside the void, but it doesn't know *direction*. This prevents standard Sphere Tracing from working efficiently over long distances.
 
-```
-Voxel A: 1.0 (solid)    Voxel B: 0.2 (mostly carved)
-         |——————————————————|
-              ↑
-         Isosurface at 0.5 appears here
-         (closer to A, because B's value is lower)
-```
+**The Solution: Hierarchical Raymarching (The "Claybook" Trick)**
+To skip empty space efficiently, we generate **MIP Maps** of the 3D texture using a **conservative** downsampling rule.
+- **Mip 0:** High-res exact distance.
+- **Mip 1:** "Conservative" distance (guarantees the wall is *at least* this far).
+- **Mip 2:** Even coarser conservative distance.
 
-This means a coarse voxel grid can produce **smooth, curved surfaces** with no extra code—exploiting what GPUs already do with texture filtering, but interpreting the result as geometry.
-
-### Core Composition Rule
-
-```
-Scene(p) = max(Base(p), -CarveMask(p))
-```
-- `Base(p)` — the original, unexcavated ground SDF (e.g., `-p.y` for flat ground at y=0)
-- `CarveMask(p)` — the excavation SDF sampled from the 3D texture (0 = untouched, positive = carved)
-- **Positive** = outside surface (air), **Negative** = inside solid
+This allows the raymarcher to take massive leaps through empty air using low-res MIPs, and only switch to high-res data when close to the surface.
 
 ---
 
@@ -44,120 +34,127 @@ Scene(p) = max(Base(p), -CarveMask(p))
 [System.Serializable]
 public class CarveVolumeSettings
 {
-    public Vector3 worldOrigin = Vector3.zero;      // Corner of the excavation bounds
-    public Vector3 worldSize = new Vector3(10, 5, 10); // 10m × 5m × 10m
-    public float voxelSize = 0.05f;                 // 5 cm resolution (adjustable)
+    public Vector3 worldOrigin = Vector3.zero;
+    public Vector3 worldSize = new Vector3(10, 5, 10);
+    public float voxelSize = 0.05f;      // 5 cm resolution
 }
 ```
-
-Derived values:
-- `resolution = ceil(worldSize / voxelSize)` → e.g., 200 × 100 × 200 at 5 cm
-- Memory: 1 byte per voxel → ~4 MB at this size
 
 #### Texture Format
 
-| Option | Precision | Notes |
-|--------|-----------|-------|
-| `R8_UNorm` | 256 levels | Lightweight; values 0–255 map to density 0.0–1.0 |
-| `R16_UNorm` | 65k levels | Higher precision if needed |
-| `R32_SFloat` | Full float | Overkill for most cases |
+| Option | Precision | Use Case |
+|--------|-----------|----------|
+| `R16_SFloat` | 16-bit Float | **Recommended.** High precision, native negative values. |
+| `R8_SNorm` | 8-bit Signed | Low memory (~4MB). Range -1 to +1. Requires remapping distances to fit range. |
 
-Start with **R8** (1 byte); upgrade if banding artifacts appear.
+**Initialization:** The texture should be initialized to a large **positive** value (e.g., `9999.0`), representing that no holes exist yet (everything is "far outside" the void).
 
-**Important:** Use `FilterMode.Trilinear` on the texture to enable hardware interpolation.
+---
 
-#### Coordinate Mapping
+### Carving (Boolean Subtraction)
+
+When the player digs, we simply combine the existing void shape with the new brush shape using a **Union** operation on the void (which effectively subtracts from the ground).
+
+**Logic:** `Void = Union(OldVoid, NewBrush)`  
+In SDF terms (where negative = inside void): `min(OldSDF, BrushSDF)`
 
 ```csharp
-// World → texture UV (0–1)
-Vector3 WorldToUV(Vector3 worldPos, CarveVolumeSettings s)
-{
-    return (worldPos - s.worldOrigin) / s.worldSize;
-}
+// 1. Calculate the Brush SDF
+// Negative = Inside brush (Air)
+// Positive = Outside brush
+float brushSDF = distance(voxelPos, brushCenter) - brushRadius;
 
-// UV → voxel index (for direct writes)
-Vector3Int UVToVoxel(Vector3 uv, Vector3Int resolution)
+// 2. Combine with existing mask
+// We take the minimum because we want the union of all "negative" zones (holes)
+float oldSDF = carveMask[voxel];
+carveMask[voxel] = Mathf.Min(oldSDF, brushSDF);
+```
+
+**Digging Speed / Softness:**
+Instead of setting the value instantly, you can subtract over time to simulate "melting" or scraping:
+```csharp
+carveMask[voxel] = Mathf.Min(carveMask[voxel], brushSDF - (digSpeed * deltaTime));
+```
+
+---
+
+### Hierarchical Raymarching
+
+#### 1. Conservative MIP Generation
+
+When updating the texture, we must update the MIP chain. The downsampling rule is crucial: **"Never lie about safety."**
+
+For a parent voxel to be "safe," it must report the minimum distance found in its children, minus a correction factor to account for the spatial difference.
+
+```csharp
+// Mip Generation Logic (Compute Shader)
+float minChild = Min(c0, c1, c2, c3, c4, c5, c6, c7);
+
+// Correction: Distance from parent center to child center
+// (Half the diagonal of the parent voxel)
+float correction = (parentVoxelSize * sqrt(3)) * 0.5;
+
+parentSDF = minChild - correction;
+```
+*Result: A low-res voxel might say "Wall is 2m away" when it's actually 2.5m away. This is safe. It will never say "2m" if the wall is 1m away.*
+
+#### 2. The Raymarching Loop
+
+We assume two samplers:
+- `SamplerPoint`: For Mip levels > 0 (Safety).
+- `SamplerLinear`: For Mip level 0 (Visual smoothness).
+
+```hlsl
+float t = 0;
+int mip = MAX_MIP; 
+
+for(int i=0; i<MAX_STEPS; i++)
 {
-    return Vector3Int.FloorToInt(uv * resolution);
+    float3 p = rayOrigin + rayDir * t;
+    
+    // 1. Sample Texture at current MIP
+    // Use Point Sampling for Mips > 0 to preserve conservative bounds!
+    float d = Texture.SampleLevel(SamplerPoint, uv, mip).r;
+    
+    // 2. The "Safety Brake"
+    // If distance is smaller than the current voxel size, this MIP is too coarse.
+    // We risk clipping. Drop down a level and retry WITHOUT marching.
+    float voxelSize = GetVoxelSize(mip);
+    if(d < voxelSize * 1.5 && mip > 0)
+    {
+        mip--;
+        continue; // Retry logic with higher res
+    }
+    
+    // 3. Surface Hit
+    // Use a small threshold. If at Mip 0, we can use Linear Sampling for exact surface.
+    if(d < 0.001) break;
+    
+    // 4. March
+    // Nudge to resolve boundary ambiguity when using coarse MIPs
+    float nudge = (mip > 0) ? (voxelSize * 0.25) : 0.0;
+    t += d + nudge;
 }
 ```
 
 ---
 
-### Carving (Sphere Brush)
+### Core Composition Rule
 
-When the player digs at position `center` with tool radius `r`:
-
-1. Compute the axis-aligned bounding box of the sphere in voxel space.
-2. For each voxel in that box:
-   - Compute world position of voxel centre.
-   - Evaluate sphere SDF: `d = length(voxelPos - center) - r`
-   - If `d < 0` (inside sphere), reduce the density:
-     ```csharp
-     // Convert penetration depth to a density reduction
-     float penetration = -d;  // Positive value indicating how far inside
-     float reduction = saturate(penetration / maxBrushPenetration);
-     
-     // Reduce density (0 = fully carved, 1 = solid)
-     carveMask[voxel] = min(carveMask[voxel], 1.0 - reduction);
-     ```
-
-The deeper inside the brush, the lower the density becomes. Voxels at the brush edge get partial values, which the GPU interpolates into smooth surfaces.
-
-#### Caveat: Carving in Air
-
-The brush writes to **all** voxels it touches, including those above the base terrain (i.e., in air). This data is harmless in most cases — the scene evaluation uses `max(baseSDF, -carveMaskSDF)`, so carving air has no visible effect.
-
-However, be aware of these edge cases:
-
-- **Union layers added later:** If you carve in air, then later add a burial mound (Union operation) that occupies that space, the mound will have an unexpected hole from the earlier carve.
-- **Wasted writes:** Large brushes mostly in air do unnecessary work. Negligible for small brushes.
-- **Save file size:** Carved regions (non-255 values) compress less efficiently.
-
-If these become problems, add a check before writing:
+With the texture now storing **Void SDF** (Negative = Air, Positive = Solid Ground), the composition logic remains:
 
 ```csharp
-if (EvaluateBase(voxelPos) < 0)  // Only carve inside solid ground
-{
-    carveMask[voxel] = min(carveMask[voxel], 1.0 - reduction);
-}
+// Base Terrain: Negative = Solid
+// Carve Mask: Negative = Air (Inside Void)
+
+// We want: Solid where (Base is Solid) AND (Carve Mask is NOT Air)
+// Boolean Subtraction: Intersection(Base, -CarveMask)
+
+float sceneSDF = max(BaseTerrain(p), -CarveMask(p));
 ```
 
-For now, the simpler approach (carve everything, ignore the harmless data) is recommended.
-
-#### GPU vs CPU
-
-| Approach | When to use |
-|----------|-------------|
-| **Compute shader** | Large brushes, high frequency digging — update many voxels per frame efficiently |
-| **CPU + `Texture3D.SetPixels`** | Simpler; fine for small brushes or low-frequency edits |
-
-Recommended: implement CPU first, profile, then port to compute if needed.
-
----
-
-### Evaluation at Runtime
-
-To query the final surface at any point `p`:
-
-```csharp
-float EvaluateScene(Vector3 p, CarveVolumeSettings settings, Texture3D carveMask)
-{
-    float baseSDF = EvaluateBase(p);               // e.g., -p.y for flat ground at y=0
-    
-    Vector3 uv = WorldToUV(p, settings);
-    if (OutOfBounds(uv)) return baseSDF;           // Outside excavation zone
-    
-    // Sample the carve mask (GPU interpolates automatically via trilinear filtering)
-    // 1.0 = untouched solid, 0.0 = fully excavated
-    float maskDensity = carveMask.SampleLevel(uv, 0);
-    
-    // Convert to an SDF: 0 when untouched, positive when carved
-    float carveMaskSDF = (1.0 - maskDensity) * maxExcavationDepth;
-    
-    return Mathf.Max(baseSDF, -carveMaskSDF);
-}
-```
+- If `CarveMask` is -5 (Inside hole) → `-(-5) = +5`. `max(Base, +5)` = **+5 (Air)**.
+- If `CarveMask` is +99 (Far from hole) → `-99`. `max(Base, -99)` = **Base (Solid)**.
 
 ---
 
