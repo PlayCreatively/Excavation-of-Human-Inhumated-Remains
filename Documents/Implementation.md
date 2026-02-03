@@ -176,6 +176,99 @@ Pipeline-agnostic notes:
 - Built-in: `Camera.AddCommandBuffer` or replacement shader.
 - HDRP: custom pass.
 
+#### Triplanar Texturing
+
+Since the terrain is generated procedurally via SDF, there are no traditional UV coordinates. Instead, use **triplanar mapping** to project textures from world space:
+
+```hlsl
+float3 TriplanarSample(Texture2D tex, SamplerState samp, float3 worldPos, float3 normal, float sharpness)
+{
+    // Sample texture from each axis
+    float3 xProj = tex.Sample(samp, worldPos.yz).rgb;
+    float3 yProj = tex.Sample(samp, worldPos.xz).rgb;
+    float3 zProj = tex.Sample(samp, worldPos.xy).rgb;
+    
+    // Blend weights based on normal direction
+    float3 blend = pow(abs(normal), sharpness);
+    blend /= (blend.x + blend.y + blend.z);  // Normalize
+    
+    return xProj * blend.x + yProj * blend.y + zProj * blend.z;
+}
+```
+
+- `worldPos` — the hit point from raymarching
+- `normal` — computed from SDF gradient
+- `sharpness` — controls blend falloff (higher = sharper transitions, typically 4–16)
+
+Scale `worldPos` before sampling to control texture tiling (e.g., `worldPos * 2.0` for 50cm repeats).
+
+#### Self-Shadowing (Optional)
+
+For more dramatic lighting, perform a **second raymarch from the surface toward the light** to check for occlusion:
+
+```hlsl
+bool _EnableSelfShadows;  // Toggle via material property
+
+float ComputeShadow(float3 hitPoint, float3 normal, float3 lightDir)
+{
+    if (!_EnableSelfShadows)
+        return 1.0;  // No shadow
+    
+    float3 rayOrigin = hitPoint + normal * 0.01;  // Offset to avoid self-intersection
+    float t = 0.0;
+    
+    for (int i = 0; i < MAX_SHADOW_STEPS; i++)
+    {
+        float3 p = rayOrigin + lightDir * t;
+        float d = EvaluateScene(p);
+        
+        if (d < EPSILON)
+            return 0.0;  // In shadow
+        
+        t += d;
+        
+        if (t > MAX_SHADOW_DISTANCE)
+            break;
+    }
+    
+    return 1.0;  // Lit
+}
+```
+
+For softer shadows, accumulate a penumbra factor instead of hard 0/1:
+
+```hlsl
+float ComputeSoftShadow(float3 hitPoint, float3 normal, float3 lightDir, float softness)
+{
+    float3 rayOrigin = hitPoint + normal * 0.01;
+    float t = 0.0;
+    float shadow = 1.0;
+    
+    for (int i = 0; i < MAX_SHADOW_STEPS; i++)
+    {
+        float3 p = rayOrigin + lightDir * t;
+        float d = EvaluateScene(p);
+        
+        if (d < EPSILON)
+            return 0.0;
+        
+        // Soft shadow: narrow misses darken more than wide misses
+        shadow = min(shadow, softness * d / t);
+        t += d;
+        
+        if (t > MAX_SHADOW_DISTANCE)
+            break;
+    }
+    
+    return saturate(shadow);
+}
+```
+
+**Performance note:** Self-shadowing roughly doubles the raymarch cost. Keep it toggleable and consider:
+- Lower step count for shadow rays
+- Shorter max distance
+- Only enabling for the main directional light
+
 ---
 
 ### Physics / Tool Collision
