@@ -1,0 +1,45 @@
+// Carve the volume using a spherical brush
+#pragma kernel CSCarve
+
+RWTexture3D<float> CarveVolume;
+
+float3 BrushPosition;
+float BrushRadius;
+float DigSpeed;
+float DeltaTime;
+float3 VolumeOrigin;
+float VoxelSize;
+float3 VolumeSize;
+int3 MinVoxel;
+
+[numthreads(8,8,8)]
+void CSCarve (uint3 id : SV_DispatchThreadID)
+{
+    // Calculate actual voxel index (offset by MinVoxel for optimization)
+    uint3 voxelIndex = MinVoxel + id;
+    
+    // Calculate world position of this voxel's center
+    float3 voxelWorldPos = VolumeOrigin + (voxelIndex + 0.5) * VoxelSize;
+    
+    // Calculate distance from brush center
+    float distanceToBrush = length(voxelWorldPos - BrushPosition);
+    
+    // Calculate brush SDF (sphere)
+    // Negative = inside brush (should be removed/air)
+    // Positive = outside brush (untouched)
+    float brushSDF = distanceToBrush - BrushRadius;
+    
+    // Read existing SDF value
+    float oldSDF = CarveVolume[voxelIndex];
+    
+    // Apply digging with speed modifier
+    // We "carve" by making the SDF more negative over time
+    float carveAmount = DigSpeed * DeltaTime;
+    float newBrushSDF = brushSDF - carveAmount;
+    
+    // Combine: union of void spaces (minimum of SDFs)
+    float newSDF = min(oldSDF, newBrushSDF);
+    
+    // Write back
+    CarveVolume[voxelIndex] = newSDF;
+}

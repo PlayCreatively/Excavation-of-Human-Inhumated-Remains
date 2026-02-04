@@ -1,0 +1,11 @@
+// Initialize the 3D volume texture to a default value
+#pragma kernel CSInitialize
+
+RWTexture3D<float> Result;
+float InitValue;
+
+[numthreads(8,8,8)]
+void CSInitialize (uint3 id : SV_DispatchThreadID)
+{
+    Result[id] = InitValue;
+}

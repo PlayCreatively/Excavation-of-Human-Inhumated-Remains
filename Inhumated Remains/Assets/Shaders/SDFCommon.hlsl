@@ -1,0 +1,89 @@
+// Common SDF utility functions
+// Shared between C# and HLSL
+
+#ifndef EXCAVATION_SDF_COMMON
+#define EXCAVATION_SDF_COMMON
+
+// SDF Combination Operations
+
+float SDFUnion(float a, float b)
+{
+    return min(a, b);
+}
+
+float SDFSubtract(float a, float b)
+{
+    return max(a, -b);
+}
+
+float SDFIntersect(float a, float b)
+{
+    return max(a, b);
+}
+
+float SDFSmoothMin(float a, float b, float k)
+{
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return lerp(b, a, h) - k * h * (1.0 - h);
+}
+
+// Layer Geometry SDFs
+
+float DepthBandSDF(float3 worldPos, float topY, float bottomY)
+{
+    float dTop = topY - worldPos.y;
+    float dBot = worldPos.y - bottomY;
+    return max(-dTop, -dBot);
+}
+
+float SphereSDF(float3 worldPos, float3 center, float radius)
+{
+    return length(worldPos - center) - radius;
+}
+
+// Get voxel size for a given MIP level
+float GetVoxelSize(float baseVoxelSize, int mipLevel)
+{
+    return baseVoxelSize * pow(2.0, mipLevel);
+}
+
+// Convert world position to texture UVW coordinates
+float3 WorldToUVW(float3 worldPos, float3 volumeOrigin, float3 volumeSize)
+{
+    float3 local = worldPos - volumeOrigin;
+    return local / volumeSize;
+}
+
+// Triplanar texture sampling
+float4 TriplanarSample(Texture2D tex, SamplerState samp, float3 worldPos, float3 normal, float scale, float sharpness)
+{
+    // Sample from each axis
+    float4 xProj = tex.Sample(samp, worldPos.yz * scale);
+    float4 yProj = tex.Sample(samp, worldPos.xz * scale);
+    float4 zProj = tex.Sample(samp, worldPos.xy * scale);
+    
+    // Blend weights based on normal
+    float3 blend = pow(abs(normal), sharpness);
+    blend /= (blend.x + blend.y + blend.z);
+    
+    return xProj * blend.x + yProj * blend.y + zProj * blend.z;
+}
+
+// Calculate normal from SDF gradient using central differences
+float3 CalculateNormal(float3 p, float epsilon, Texture3D<float> volumeTex, SamplerState samp,
+                       float3 volumeOrigin, float3 volumeSize)
+{
+    float3 uvw = WorldToUVW(p, volumeOrigin, volumeSize);
+    
+    float2 e = float2(epsilon, 0.0);
+    
+    float3 n = float3(
+        volumeTex.SampleLevel(samp, uvw + e.xyy, 0).r - volumeTex.SampleLevel(samp, uvw - e.xyy, 0).r,
+        volumeTex.SampleLevel(samp, uvw + e.yxy, 0).r - volumeTex.SampleLevel(samp, uvw - e.yxy, 0).r,
+        volumeTex.SampleLevel(samp, uvw + e.yyx, 0).r - volumeTex.SampleLevel(samp, uvw - e.yyx, 0).r
+    );
+    
+    return normalize(n);
+}
+
+#endif // EXCAVATION_SDF_COMMON

@@ -1,0 +1,50 @@
+// Generate conservative MIP maps for hierarchical raymarching
+#pragma kernel CSGenerateMip
+
+Texture3D<float> SourceMip;
+RWTexture3D<float> DestMip;
+float ParentVoxelSize;
+
+SamplerState samplerSourceMip
+{
+    Filter = MIN_MAG_MIP_POINT;
+    AddressU = Clamp;
+    AddressV = Clamp;
+    AddressW = Clamp;
+};
+
+[numthreads(8,8,8)]
+void CSGenerateMip (uint3 id : SV_DispatchThreadID)
+{
+    // Sample 8 child voxels (2x2x2 cube)
+    uint3 childBase = id * 2;
+    
+    // Read all 8 children
+    float c0 = SourceMip[childBase + uint3(0, 0, 0)];
+    float c1 = SourceMip[childBase + uint3(1, 0, 0)];
+    float c2 = SourceMip[childBase + uint3(0, 1, 0)];
+    float c3 = SourceMip[childBase + uint3(1, 1, 0)];
+    float c4 = SourceMip[childBase + uint3(0, 0, 1)];
+    float c5 = SourceMip[childBase + uint3(1, 0, 1)];
+    float c6 = SourceMip[childBase + uint3(0, 1, 1)];
+    float c7 = SourceMip[childBase + uint3(1, 1, 1)];
+    
+    // Find minimum (most conservative for safety)
+    float minChild = c0;
+    minChild = min(minChild, c1);
+    minChild = min(minChild, c2);
+    minChild = min(minChild, c3);
+    minChild = min(minChild, c4);
+    minChild = min(minChild, c5);
+    minChild = min(minChild, c6);
+    minChild = min(minChild, c7);
+    
+    // Apply correction factor (half diagonal of parent voxel)
+    // This ensures we never report a distance larger than is safe
+    float correction = (ParentVoxelSize * sqrt(3.0)) * 0.5;
+    
+    float parentSDF = minChild - correction;
+    
+    // Write to parent MIP level
+    DestMip[id] = parentSDF;
+}
