@@ -26,6 +26,7 @@ Shader "Excavation/ExcavationRaymarch"
 
         // Lighting
         _AmbientIntensity("Ambient Intensity", Range(0, 1)) = 0.15
+        _DiffuseIntensity("Diffuse Intensity", Range(0, 2)) = 1.0
 
         // Self-shadowing
         [Toggle] _EnableSelfShadows("Enable Self Shadows", Float) = 0
@@ -107,6 +108,7 @@ Shader "Excavation/ExcavationRaymarch"
 
             // Lighting
             float _AmbientIntensity;
+            float _DiffuseIntensity;
 
             // Layer data (extended for all geometry types)
             float4 _LayerColors[8];
@@ -235,7 +237,16 @@ Shader "Excavation/ExcavationRaymarch"
 
                 // Sample carve volume
                 // Initial value +9999 (uncarved), becomes negative inside carved regions
-                float carveSDF = _CarveVolume.SampleLevel(sampler_point_clamp, uvw, mipLevel).r;
+                // USE LINEAR SAMPLING AT MIP 0 to ensure smooth normals and lighting gradients
+                float carveSDF;
+                if (mipLevel == 0)
+                {
+                     carveSDF = _CarveVolume.SampleLevel(sampler_linear_clamp, uvw, mipLevel).r;
+                }
+                else
+                {
+                     carveSDF = _CarveVolume.SampleLevel(sampler_point_clamp, uvw, mipLevel).r;
+                }
                 
                 // CSG subtraction: terrain minus carved void
                 // -carveSDF flips the void, max() performs the subtraction
@@ -399,6 +410,8 @@ Shader "Excavation/ExcavationRaymarch"
                 float3 posWS = TransformObjectToWorld(input.positionOS.xyz);
                 output.positionCS = TransformWorldToHClip(posWS);
                 output.positionWS = posWS;
+                output.rayOrigin = float3(0,0,0);
+                output.rayDir = float3(0,0,0);
                 return output;
             }
             
@@ -460,8 +473,8 @@ Shader "Excavation/ExcavationRaymarch"
                 float shadow = ComputeSoftShadow(hitPoint, finalNormal, lightDir);
 
                 // Final color with ambient and diffuse lighting
-                float3 ambient = materialColor * _AmbientIntensity;
-                float3 diffuse = materialColor * ndotl * shadow * _MainLightColor.rgb;
+                float3 ambient = materialColor * _AmbientIntensity * _DiffuseIntensity;
+                float3 diffuse = materialColor * ndotl /* * shadow*/ * _MainLightColor.rgb * _DiffuseIntensity;
                 output.color = float4(ambient + diffuse, 1.0);
 
                 // hitPoint is camera-relative, TransformWorldToHClip expects this in HDRP
