@@ -68,9 +68,6 @@ namespace Excavation.Rendering
         {
             var settings = excavationManager.Settings;
 
-            // Position the renderer at the volume's center
-            volumeTransform.position = settings.worldOrigin + settings.worldSize * 0.5f;
-
             // Create a cube mesh with the volume's dimensions
             Mesh mesh = new()
             {

@@ -207,41 +207,35 @@ Shader "Excavation/ExcavationRaymarch"
             }
 
 
-            // Signed distance to a sphere. Negative inside.
-            float EvaluateDebugSphereSDF(float3 worldPos, float3 centerWS, float radiusWS)
-            {
-                return length(worldPos - centerWS) - radiusWS;
-            }
-
-            // Debug scene SDF: a sphere inside the volume AABB.
-            // Signature matches your existing EvaluateSceneSDF(worldPos, mipLevel).
-            float EvaluateSceneSDF_DebugSphere(float3 worldPos, int mipLevel)
-            {
-                // Put the sphere somewhere obvious: center of the volume
-                float3 boxMin = _VolumeOrigin - 0.5 * _VolumeSize;
-                float3 boxMax = _VolumeOrigin + _VolumeSize;
-                float3 center = _VolumeOrigin;
-
-                // Radius: quarter of the smallest box dimension
-                float r = 0.25 * min(_VolumeSize.x, min(_VolumeSize.y, _VolumeSize.z));
-
-                // Pure sphere SDF
-                return EvaluateDebugSphereSDF(worldPos, center, r);
-            }
-
-
-            
             // Evaluate base terrain SDF (flat ground for now)
+            // worldPos is camera-relative; convert to absolute Y for comparison
             float EvaluateBaseTerrain(float3 worldPos)
             {
-                return worldPos.y - _BaseTerrainY;
+                return (worldPos.y + _WorldSpaceCameraPos.y) - _BaseTerrainY;
             }
             
             // Evaluate the complete scene SDF
+            // worldPos is in camera-relative space
             // Uses linear sampling at MIP 0 for visual smoothness, point for higher MIPs
             float EvaluateSceneSDF(float3 worldPos, int mipLevel)
             {
-                return EvaluateSceneSDF_DebugSphere(worldPos, mipLevel);
+                float baseSDF = EvaluateBaseTerrain(worldPos);
+                
+                // Convert camera-relative position to absolute world position for UVW lookup
+                float3 absoluteWorldPos = worldPos + _WorldSpaceCameraPos;
+                float3 uvw = WorldToUVW(absoluteWorldPos, _VolumeOrigin, _VolumeSize);
+
+                // Outside volume: just return terrain
+                if (any(uvw < 0.0) || any(uvw > 1.0))
+                {
+                    return baseSDF;
+                }
+
+                // Sample carve volume (stored as positive = carved away)
+                float carveSDF = _CarveVolume.SampleLevel(sampler_point_clamp, uvw, mipLevel).r;
+                
+                // Combine: terrain minus carved regions
+                return max(baseSDF, -carveSDF);
             }
             
             // Helper to sample correct texture based on index
@@ -409,50 +403,64 @@ Shader "Excavation/ExcavationRaymarch"
                 float4 color : SV_Target;
                 float depth : SV_Depth;
             };
-            
-            // Analytic ray-sphere intersection. Returns true if hit, outputs t parameter.
-            bool RaySphereIntersect(float3 ro, float3 rd, float3 center, float radius, out float t)
-            {
-                float3 oc = ro - center;
-                float b = dot(oc, rd);
-                float c = dot(oc, oc) - radius * radius;
-                float disc = b * b - c;
-                if (disc < 0.0) { t = 0; return false; }
-                t = -b - sqrt(disc);
-                if (t < 0.0) { t = -b + sqrt(disc); } // inside sphere, use far hit
-                return t > 0.0;
-            }
 
             FragOutput frag(Varyings input)
             {
                 FragOutput output;
 
                 // In HDRP camera-relative rendering, camera is at (0,0,0)
-                // positionWS from vertex shader is already camera-relative
                 float3 rayOrigin = float3(0, 0, 0);
                 float3 rayDir = normalize(input.positionWS);
 
-                // Convert volume center to camera-relative space
-                float3 sphereCenterAbs = _VolumeOrigin + _VolumeSize * 0.5;
-                float3 sphereCenter = sphereCenterAbs - _WorldSpaceCameraPos;
-                float sphereRadius = 0.2 * min(_VolumeSize.x, min(_VolumeSize.y, _VolumeSize.z));
+                // Volume AABB in camera-relative space
+                float3 boxMin = (_VolumeOrigin - 0.5 * _VolumeSize) - _WorldSpaceCameraPos;
+                float3 boxMax = (_VolumeOrigin + 0.5 * _VolumeSize) - _WorldSpaceCameraPos;
 
-                float t;
-                if (!RaySphereIntersect(rayOrigin, rayDir, sphereCenter, sphereRadius, t))
+                float tEnter, tExit;
+                if (!RayAABBIntersect(rayOrigin, rayDir, boxMin, boxMax, tEnter, tExit))
                     discard;
 
-                float3 hitPoint = rayOrigin + rayDir * t;
-                float3 normal = normalize(hitPoint - sphereCenter);
+                tEnter = max(tEnter, 0.0) + 1e-4;
 
-                // Simple diffuse lighting
-                float3 lightDir = normalize(float3(1, 1, 1));
-                float ndotl = max(0.0, dot(normal, lightDir));
+                // Raymarch the terrain + carve volume SDF
+                float3 hitPoint;
+                float totalDist;
+                bool hit = RaymarchSegment(rayOrigin, rayDir, tEnter, tExit, hitPoint, totalDist);
 
-                // Bright green
-                float3 sphereColor = float3(0.1, 1.0, 0.1);
-                output.color = float4(sphereColor * (0.3 + 0.7 * ndotl), 1.0);
+                if (!hit) discard;
 
-                // hitPoint is camera-relative — TransformWorldToHClip expects this in HDRP
+                // Convert hit point to absolute world space for material lookups
+                float3 hitPointAbsolute = hitPoint + _WorldSpaceCameraPos;
+
+                // Calculate normal via finite differences on the SDF
+                float3 eps = float3(0.001, 0.0, 0.0);
+                float3 normal = normalize(float3(
+                    EvaluateSceneSDF(hitPoint + eps.xyy, 0) - EvaluateSceneSDF(hitPoint - eps.xyy, 0),
+                    EvaluateSceneSDF(hitPoint + eps.yxy, 0) - EvaluateSceneSDF(hitPoint - eps.yxy, 0),
+                    EvaluateSceneSDF(hitPoint + eps.yyx, 0) - EvaluateSceneSDF(hitPoint - eps.yyx, 0)
+                ));
+
+                // Get material data (uses absolute world position for layer SDFs and texturing)
+                float3 materialColor;
+                float3 finalNormal;
+                GetMaterialData(hitPointAbsolute, normal, materialColor, finalNormal);
+
+                // Lighting: use main light direction or fallback
+                float3 lightDir = normalize(_MainLightDirection.xyz);
+                if (length(_MainLightDirection) < 0.01)
+                    lightDir = normalize(float3(1, 1, 1));
+                
+                float ndotl = max(0.0, dot(finalNormal, lightDir));
+
+                // Compute shadows if enabled
+                float shadow = ComputeSoftShadow(hitPoint, finalNormal, lightDir);
+
+                // Final color with ambient and diffuse lighting
+                float3 ambient = materialColor * _AmbientIntensity;
+                float3 diffuse = materialColor * ndotl * shadow * _MainLightColor.rgb;
+                output.color = float4(ambient + diffuse, 1.0);
+
+                // hitPoint is camera-relative, TransformWorldToHClip expects this in HDRP
                 float4 clipPos = TransformWorldToHClip(hitPoint);
                 output.depth = clipPos.z / clipPos.w;
 
