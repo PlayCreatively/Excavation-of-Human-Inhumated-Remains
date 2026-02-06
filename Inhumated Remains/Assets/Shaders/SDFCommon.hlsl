@@ -69,6 +69,20 @@ float4 TriplanarSample(Texture2D tex, SamplerState samp, float3 worldPos, float3
     return xProj * blend.x + yProj * blend.y + zProj * blend.z;
 }
 
+float4 TriplanarSampleLevel(Texture2D tex, SamplerState samp, float3 worldPos, float3 normal, float scale, float sharpness, float mipLevel)
+{
+    // Sample from each axis
+    float4 xProj = tex.SampleLevel(samp, worldPos.yz * scale, mipLevel);
+    float4 yProj = tex.SampleLevel(samp, worldPos.xz * scale, mipLevel);
+    float4 zProj = tex.SampleLevel(samp, worldPos.xy * scale, mipLevel);
+    
+    // Blend weights based on normal
+    float3 blend = pow(abs(normal), sharpness);
+    blend /= (blend.x + blend.y + blend.z);
+    
+    return xProj * blend.x + yProj * blend.y + zProj * blend.z;
+}
+
 // Calculate normal from SDF gradient using central differences
 float3 CalculateNormal(float3 p, float epsilon, Texture3D<float> volumeTex, SamplerState samp,
                        float3 volumeOrigin, float3 volumeSize)

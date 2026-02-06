@@ -40,6 +40,14 @@ namespace Excavation.Core
         [Range(0.0001f, 0.01f)]
         public float surfaceThreshold = 0.001f;
 
+        [Tooltip("Scale factor for triplanar texture mapping")]
+        [Range(0.1f, 10f)]
+        public float textureScale = 1.0f;
+
+        [Tooltip("Sharpness of triplanar texture blending (higher = sharper transitions)")]
+        [Range(1f, 64f)]
+        public float textureSharpness = 8.0f;
+
         /// <summary>
         /// Calculate the texture resolution based on world size and voxel size.
         /// </summary>

@@ -21,6 +21,11 @@ namespace Excavation.Stratigraphy
         [Tooltip("Base terrain Y level (flat ground)")]
         [SerializeField] private float baseTerrainY = 0f;
 
+        /// <summary>
+        /// Public accessor for the base terrain Y level.
+        /// </summary>
+        public float BaseTerrainY => baseTerrainY;
+
         [Header("Debug")]
         [SerializeField] private bool drawGizmos = true;
         [SerializeField] private bool debugSphereTrace = false;

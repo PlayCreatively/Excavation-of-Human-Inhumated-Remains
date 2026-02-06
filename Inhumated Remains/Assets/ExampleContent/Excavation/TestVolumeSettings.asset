@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c4ea7c8aaddc59342a370887a5a91f90, type: 3}
   m_Name: TestVolumeSettings
   m_EditorClassIdentifier: Excavation::Excavation.Core.ExcavationVolumeSettings
-  worldOrigin: {x: 0, y: 0, z: 0}
-  worldSize: {x: 5, y: 3, z: 5}
+  worldOrigin: {x: 0, y: -1, z: 0}
+  worldSize: {x: 15, y: 9, z: 15}
   voxelSize: 0.1
   textureFormat: 0
   maxMipLevel: 4

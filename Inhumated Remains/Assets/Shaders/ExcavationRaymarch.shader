@@ -19,6 +19,10 @@ Shader "Excavation/ExcavationRaymarch"
         // Stratigraphy (up to 8 layers)
         _LayerCount("Layer Count", Int) = 0
         
+        // Texture Settings
+        _TextureScale("Texture Scale", Float) = 1.0
+        _TextureSharpness("Texture Sharpness", Float) = 8.0
+
         // Self-shadowing
         [Toggle] _EnableSelfShadows("Enable Self Shadows", Float) = 0
         _ShadowSteps("Shadow Steps", Int) = 32
@@ -42,7 +46,7 @@ Shader "Excavation/ExcavationRaymarch"
             
             ZWrite On
             ZTest LEqual
-            Cull Front  // Render back faces for proper ray entry
+            Cull Front  // Render back faces for proper ray entry from inside volume
             
             HLSLPROGRAM
             #pragma vertex vert
@@ -73,6 +77,15 @@ Shader "Excavation/ExcavationRaymarch"
                 AddressW = Clamp;
             };
             
+            // Texture Sampler
+            SamplerState sampler_linear_repeat
+            {
+                Filter = MIN_MAG_MIP_LINEAR;
+                AddressU = Wrap;
+                AddressV = Wrap;
+                AddressW = Wrap;
+            };
+            
             // Shader properties
             float3 _VolumeOrigin;
             float3 _VolumeSize;
@@ -83,9 +96,23 @@ Shader "Excavation/ExcavationRaymarch"
             float _BaseTerrainY;
             int _LayerCount;
             
-            // Layer data arrays
+            // Texture Settings
+            float _TextureScale;
+            float _TextureSharpness;
+
+            // Layer data
             float4 _LayerColors[8];
             float4 _LayerParams[8];  // Geometry parameters per layer
+            
+            // Textures (up to 8 layers)
+            Texture2D _LayerAlbedo0; Texture2D _LayerNormal0;
+            Texture2D _LayerAlbedo1; Texture2D _LayerNormal1;
+            Texture2D _LayerAlbedo2; Texture2D _LayerNormal2;
+            Texture2D _LayerAlbedo3; Texture2D _LayerNormal3;
+            Texture2D _LayerAlbedo4; Texture2D _LayerNormal4;
+            Texture2D _LayerAlbedo5; Texture2D _LayerNormal5;
+            Texture2D _LayerAlbedo6; Texture2D _LayerNormal6;
+            Texture2D _LayerAlbedo7; Texture2D _LayerNormal7;
             
             // Shadow parameters
             float _EnableSelfShadows;
@@ -93,9 +120,9 @@ Shader "Excavation/ExcavationRaymarch"
             float _ShadowDistance;
             float _ShadowSoftness;
             
-            // Light direction (main directional light)
-            static float3 _MainLightDirection = float3(0.5, -1.0, 0.5);
-            static float4 _MainLightColor = float4(1, 1, 1, 1);
+            // Light direction (passed from script)
+            float3 _MainLightDirection;
+            float4 _MainLightColor;
             
             struct Attributes
             {
@@ -114,44 +141,65 @@ Shader "Excavation/ExcavationRaymarch"
             // Evaluate base terrain SDF (flat ground for now)
             float EvaluateBaseTerrain(float3 worldPos)
             {
-                // Simple flat ground
-                float baseSDF = worldPos.y - _BaseTerrainY;
-                
-                // TODO: Apply layer geometry operations here
-                // For now, just flat ground
-                
-                return baseSDF;
+                return worldPos.y - _BaseTerrainY;
             }
             
             // Evaluate the complete scene SDF
             float EvaluateSceneSDF(float3 worldPos, int mipLevel)
             {
-                // Get base terrain
                 float baseSDF = EvaluateBaseTerrain(worldPos);
-                
-                // Sample carve volume
                 float3 uvw = WorldToUVW(worldPos, _VolumeOrigin, _VolumeSize);
                 
-                // Check bounds
                 if (any(uvw < 0.0) || any(uvw > 1.0))
                 {
-                    return baseSDF; // Outside volume, just return base terrain
+                    return baseSDF;
                 }
                 
-                // Sample at current MIP level
                 float carveSDF = _CarveVolume.SampleLevel(sampler_point_clamp, uvw, mipLevel).r;
-                
-                // Boolean subtraction: max(base, -carve)
                 return max(baseSDF, -carveSDF);
             }
             
-            // Get material layer at world position (simplified)
-            float4 GetMaterialColor(float3 worldPos)
+            // Helper to sample correct texture based on index
+            void SampleLayerTexture(int index, float3 pos, float3 normal, out float3 albedo, out float3 normalTan)
             {
-                // Evaluate layers from top to bottom
+                // Explicit branching
+                float mip = 0; 
+                float scale = _TextureScale;
+                float sharpness = _TextureSharpness;
+                
+                float3 col = float3(1,1,1);
+                float3 nrm = float3(0,0,1); // Default normal
+                
+                // Override scale if provided in params?
+                if (index >= 0 && index < 8) 
+                {
+                     // Use global scale for now, ignore per-layer scale unless needed
+                }
+
+                // Manual unroll
+                if (index == 0) col = TriplanarSampleLevel(_LayerAlbedo0, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb;
+                else if (index == 1) col = TriplanarSampleLevel(_LayerAlbedo1, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb;
+                else if (index == 2) col = TriplanarSampleLevel(_LayerAlbedo2, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb;
+                else if (index == 3) col = TriplanarSampleLevel(_LayerAlbedo3, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb;
+                else if (index == 4) col = TriplanarSampleLevel(_LayerAlbedo4, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb;
+                else if (index == 5) col = TriplanarSampleLevel(_LayerAlbedo5, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb;
+                else if (index == 6) col = TriplanarSampleLevel(_LayerAlbedo6, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb;
+                else if (index == 7) col = TriplanarSampleLevel(_LayerAlbedo7, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb;
+                
+                albedo = col;
+                normalTan = float3(0,0,1); 
+            }
+            
+            // Get material layer at world position
+            void GetMaterialData(float3 worldPos, float3 normal, out float3 color, out float3 finalNormal)
+            {
+                int layerIndex = -1;
+                
+                // Use default params if loop fails
+                float defaultScale = _TextureScale;
+
                 for (int i = 0; i < _LayerCount; i++)
                 {
-                    // For DepthBand layers (type 0)
                     float topY = _LayerParams[i].x;
                     float bottomY = _LayerParams[i].y;
                     
@@ -159,37 +207,46 @@ Shader "Excavation/ExcavationRaymarch"
                     
                     if (sdf < 0.0)
                     {
-                        return _LayerColors[i];
+                        layerIndex = i;
+                        break;
                     }
                 }
                 
-                // Default: brown dirt
-                return float4(0.55, 0.4, 0.25, 1.0);
+                if (layerIndex >= 0)
+                {
+                    float3 texColor;
+                    float3 texNormal;
+                    SampleLayerTexture(layerIndex, worldPos, normal, texColor, texNormal);
+                    
+                    color = _LayerColors[layerIndex].rgb * texColor;
+                    finalNormal = normal; // TODO: perturb normal
+                }
+                else
+                {
+                    // Default fallback
+                    color = float3(1, 0.0, 1);
+                    finalNormal = normal;
+                }
             }
             
             // Hierarchical raymarching
             bool Raymarch(float3 origin, float3 dir, out float3 hitPoint, out float totalDist)
             {
                 float t = 0.0;
-                int mip = 4; // Start at coarse MIP level
-                int maxMip = 4;
+                int mip = 4;
                 
                 for (int i = 0; i < _MaxSteps; i++)
                 {
                     float3 p = origin + dir * t;
-                    
-                    // Sample at current MIP
                     float d = EvaluateSceneSDF(p, mip);
                     
-                    // Safety brake: if distance is smaller than voxel size, drop to lower MIP
                     float voxelSize = GetVoxelSize(_VoxelSize, mip);
                     if (d < voxelSize * 1.5 && mip > 0)
                     {
                         mip--;
-                        continue; // Retry with higher resolution
+                        continue;
                     }
                     
-                    // Surface hit
                     if (d < _SurfaceThreshold)
                     {
                         hitPoint = p;
@@ -197,13 +254,9 @@ Shader "Excavation/ExcavationRaymarch"
                         return true;
                     }
                     
-                    // Too far
                     if (t > _MaxDistance)
-                    {
                         break;
-                    }
                     
-                    // March forward (with small nudge for coarse MIPs)
                     float nudge = (mip > 0) ? (voxelSize * 0.25) : 0.0;
                     t += d + nudge;
                 }
@@ -216,11 +269,10 @@ Shader "Excavation/ExcavationRaymarch"
             // Compute soft shadows
             float ComputeSoftShadow(float3 hitPoint, float3 normal, float3 lightDir)
             {
-                if (_EnableSelfShadows < 0.5)
-                    return 1.0;
+                if (_EnableSelfShadows < 0.5) return 1.0;
                 
                 float3 rayOrigin = hitPoint + normal * 0.01;
-                float t = 0.0;
+                float t = 0.01;
                 float shadow = 1.0;
                 
                 for (int i = 0; i < _ShadowSteps; i++)
@@ -228,14 +280,12 @@ Shader "Excavation/ExcavationRaymarch"
                     float3 p = rayOrigin + lightDir * t;
                     float d = EvaluateSceneSDF(p, 0);
                     
-                    if (d < 0.001)
-                        return 0.0;
+                    if (d < 0.001) return 0.0;
                     
                     shadow = min(shadow, _ShadowSoftness * d / t);
                     t += d;
                     
-                    if (t > _ShadowDistance)
-                        break;
+                    if (t > _ShadowDistance) break;
                 }
                 
                 return saturate(shadow);
@@ -244,15 +294,10 @@ Shader "Excavation/ExcavationRaymarch"
             Varyings vert(Attributes input)
             {
                 Varyings output;
-                
-                // Transform to clip space
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 output.positionWS = TransformObjectToWorld(input.positionOS.xyz);
-                
-                // Ray setup
                 output.rayOrigin = _WorldSpaceCameraPos;
                 output.rayDir = normalize(output.positionWS - output.rayOrigin);
-                
                 return output;
             }
             
@@ -266,36 +311,33 @@ Shader "Excavation/ExcavationRaymarch"
             {
                 FragOutput output;
                 
-                // Perform raymarching
                 float3 hitPoint;
                 float totalDist;
                 bool hit = Raymarch(input.rayOrigin, input.rayDir, hitPoint, totalDist);
                 
-                if (!hit)
-                {
-                    discard; // No surface hit
-                }
+                if (!hit) discard;
                 
                 // Calculate normal
                 float3 normal = CalculateNormal(hitPoint, 0.001, _CarveVolume, sampler_linear_clamp,
                                                 _VolumeOrigin, _VolumeSize);
                 
-                // Get material color
-                float4 albedo = GetMaterialColor(hitPoint);
+                // Get material data (triPlanar)
+                float3 albedo;
+                float3 perturbedNormal;
+                GetMaterialData(hitPoint, normal, albedo, perturbedNormal);
                 
-                // Simple lighting (Lambert)
-                float3 lightDir = normalize(-_MainLightDirection);
-                float ndotl = max(0.0, dot(normal, lightDir));
+                float3 sceneNormal = normal; // Use perturbed here if implemented
                 
-                // Compute shadows
-                float shadow = ComputeSoftShadow(hitPoint, normal, lightDir);
+                // Lighting
+                float3 lightDir = normalize(-_MainLightDirection); 
+                float ndotl = max(0.0, dot(sceneNormal, lightDir));
                 
-                // Final color
-                float3 ambient = albedo.rgb * 0.2;
-                float3 diffuse = albedo.rgb * ndotl * shadow;
-                float3 finalColor = ambient + diffuse;
+                float shadow = ComputeSoftShadow(hitPoint, sceneNormal, lightDir);
                 
-                output.color = float4(finalColor, 1.0);
+                float3 ambient = albedo * 0.15; 
+                float3 diffuse = albedo * _MainLightColor.rgb * ndotl * shadow;
+                
+                output.color = float4(ambient + diffuse, 1.0);
                 
                 // Write depth
                 float4 clipPos = TransformWorldToHClip(hitPoint);

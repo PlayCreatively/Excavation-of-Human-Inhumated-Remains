@@ -29,18 +29,20 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _BaseTerrainY: 0
+    - _BaseTerrainY: -0.63
     - _EnableSelfShadows: 0
-    - _LayerCount: 0
+    - _LayerCount: 2
     - _MaxDistance: 50
     - _MaxSteps: 128
     - _ShadowDistance: 5
     - _ShadowSoftness: 4
     - _ShadowSteps: 32
     - _SurfaceThreshold: 0.001
-    - _VoxelSize: 0.05
+    - _TextureScale: 1
+    - _TextureSharpness: 8
+    - _VoxelSize: 0.1
     m_Colors:
-    - _VolumeOrigin: {r: 0, g: 0, b: 0, a: 0}
-    - _VolumeSize: {r: 10, g: 5, b: 10, a: 0}
+    - _VolumeOrigin: {r: 0, g: -1, b: 0, a: 0}
+    - _VolumeSize: {r: 15, g: 9, b: 15, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

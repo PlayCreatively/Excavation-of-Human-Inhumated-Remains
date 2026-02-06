@@ -11,10 +11,8 @@ namespace Excavation.Core
     /// </summary>
     public class ExcavationManager : MonoBehaviour
     {
-        [Header("Configuration")]
         [SerializeField] private ExcavationVolumeSettings settings;
 
-        [Header("Compute Shaders")]
         [SerializeField] private ComputeShader carveShader;
         [SerializeField] private ComputeShader mipGenShader;
 

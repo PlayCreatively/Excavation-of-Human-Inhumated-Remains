@@ -13,16 +13,16 @@ MonoBehaviour:
   m_Name: Topsoil
   m_EditorClassIdentifier: Excavation::Excavation.Stratigraphy.MaterialLayer
   layerName: Topsoil
-  baseColour: {r: 0.4, g: 0.3, b: 0.2, a: 1}
-  albedoTexture: {fileID: 0}
+  baseColour: {r: 0.9547169, g: 0.39449623, b: 0.66821885, a: 1}
+  albedoTexture: {fileID: 2800000, guid: e22999099a63428499f51e2c7e9b717f, type: 3}
   normalMap: {fileID: 0}
   hardness: 4
   geometryData:
-    rid: 3354859648544931945
+    rid: 3354859675492024390
   references:
     version: 2
     RefIds:
-    - rid: 3354859648544931945
+    - rid: 3354859675492024390
       type: {class: DepthBandGeometry, ns: Excavation.Stratigraphy, asm: Excavation}
       data:
         operation: 0

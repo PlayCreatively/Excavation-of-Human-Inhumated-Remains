@@ -13,16 +13,16 @@ MonoBehaviour:
   m_Name: Subsoil
   m_EditorClassIdentifier: Excavation::Excavation.Stratigraphy.MaterialLayer
   layerName: Subsoil
-  baseColour: {r: 0.6, g: 0.4, b: 0.2, a: 1}
-  albedoTexture: {fileID: 0}
+  baseColour: {r: 0.64020836, g: 0.89433956, b: 0.26830178, a: 1}
+  albedoTexture: {fileID: 2800000, guid: e22999099a63428499f51e2c7e9b717f, type: 3}
   normalMap: {fileID: 0}
-  hardness: 7
+  hardness: 5.75
   geometryData:
-    rid: 3354859648544931946
+    rid: 3354859675492024391
   references:
     version: 2
     RefIds:
-    - rid: 3354859648544931946
+    - rid: 3354859675492024391
       type: {class: DepthBandGeometry, ns: Excavation.Stratigraphy, asm: Excavation}
       data:
         operation: 0
