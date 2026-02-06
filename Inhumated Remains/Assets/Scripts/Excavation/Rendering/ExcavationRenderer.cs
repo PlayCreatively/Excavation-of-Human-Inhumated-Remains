@@ -56,10 +56,10 @@ namespace Excavation.Rendering
         private void GenerateProxyMesh()
         {
             var settings = excavationManager.Settings;
-            
+
             // Position the renderer at the volume's center
             transform.position = settings.worldOrigin + settings.worldSize * 0.5f;
-            
+
             // Create a cube mesh with the volume's dimensions
             Mesh mesh = new Mesh();
             mesh.name = "Excavation Proxy";
@@ -141,28 +141,36 @@ namespace Excavation.Rendering
             // Layer data (simplified - just pass count and first few layers)
             if (stratigraphy != null && stratigraphy.Layers != null)
             {
-                mat.SetInt("_LayerCount", Mathf.Min(stratigraphy.Layers.Count, 8)); // Max 8 layers for shader
+                int layerCount = Mathf.Min(stratigraphy.Layers.Count, 8);
+                mat.SetInt("_LayerCount", layerCount); // Max 8 layers for shader
+                mat.SetInt("_MaxMipLevel", settings.GetMaxMipLevel());
 
                 // Pass layer colors and properties
                 Color[] layerColors = new Color[8];
-                Vector4[] layerParams = new Vector4[8]; // Store geometry parameters
+                Vector4[] layerParams = new Vector4[8];  // Primary geometry parameters
+                Vector4[] layerParams2 = new Vector4[8]; // Secondary geometry parameters (noise, etc.)
+                float[] geometryTypes = new float[8];        // Geometry type IDs
 
-                for (int i = 0; i < Mathf.Min(stratigraphy.Layers.Count, 8); i++)
+                for (int i = 0; i < layerCount; i++)
                 {
                     if (stratigraphy.Layers[i] != null)
                     {
                         layerColors[i] = stratigraphy.Layers[i].baseColour;
-                        
-                        // Pack layer geometry info (type-specific)
-                        if (stratigraphy.Layers[i].geometryData is DepthBandGeometry depth)
+
+                        var geometry = stratigraphy.Layers[i].geometryData;
+                        if (geometry != null)
                         {
-                            layerParams[i] = new Vector4(depth.topY, depth.bottomY, 0, 0); // Type 0 = DepthBand
+                            geometryTypes[i] = (int)geometry.GeometryType;
+                            layerParams[i] = geometry.GetPackedParams();
+                            layerParams2[i] = geometry.GetPackedParams2();
                         }
                     }
                 }
 
                 mat.SetColorArray("_LayerColors", layerColors);
                 mat.SetVectorArray("_LayerParams", layerParams);
+                mat.SetVectorArray("_LayerParams2", layerParams2);
+                mat.SetFloatArray("_GeometryTypes", geometryTypes);
             }
         }
     }

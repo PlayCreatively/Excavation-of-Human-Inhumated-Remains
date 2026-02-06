@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.Rendering;
+using System;
 using System.Collections.Generic;
 using Excavation.Core;
 
@@ -30,6 +32,17 @@ namespace Excavation.Stratigraphy
         [SerializeField] private bool drawGizmos = true;
         [SerializeField] private bool debugSphereTrace = false;
         public Vector3 debugPosition = Vector3.zero;
+
+        [Header("GPU Query")]
+        [Tooltip("Compute shader for GPU SDF queries (optional, improves performance)")]
+        [SerializeField] private ComputeShader sdfQueryShader;
+
+        // GPU Query state
+        private ComputeBuffer queryPositionsBuffer;
+        private ComputeBuffer queryResultsBuffer;
+        private float[] pendingQueryResults;
+        private bool queryInFlight = false;
+        private Action<float[]> pendingCallback;
 
         public List<MaterialLayer> Layers => layers;
 
@@ -103,7 +116,7 @@ namespace Excavation.Stratigraphy
             if (excavationManager != null && excavationManager.CarveVolume != null)
             {
                 float carveSDF = SampleCarveVolume(worldPos, excavationManager);
-                
+
                 // Boolean subtraction: max(base, -carve)
                 // If carve is negative (inside hole), -carve becomes positive, making the final SDF positive (air)
                 return Mathf.Max(baseSDF, -carveSDF);
@@ -118,7 +131,7 @@ namespace Excavation.Stratigraphy
         private float SampleCarveVolume(Vector3 worldPos, ExcavationManager excavationManager)
         {
             var settings = excavationManager.Settings;
-            
+
             // Convert world position to texture UVW coordinates
             Vector3 localPos = worldPos - settings.worldOrigin;
             Vector3 uvw = new Vector3(
@@ -136,7 +149,7 @@ namespace Excavation.Stratigraphy
             // Note: Reading from RenderTexture in C# requires creating a temporary Texture3D
             // For performance, this should primarily be done in shaders
             // This is mainly for CPU-side collision detection
-            
+
             // For now, return a placeholder
             // In production, you'd read the texture or use a compute shader for queries
             return 9999f;
@@ -179,6 +192,141 @@ namespace Excavation.Stratigraphy
 
             return Core.SurfaceHit.Miss();
         }
+
+        #region GPU Query System
+
+        /// <summary>
+        /// Submit a batch of positions to query SDF values on the GPU.
+        /// Results will be returned asynchronously via the callback.
+        /// This is much faster than CPU sampling for large numbers of queries.
+        /// </summary>
+        /// <param name="positions">World positions to query</param>
+        /// <param name="excavationManager">Reference to the excavation manager</param>
+        /// <param name="callback">Callback with SDF values for each position</param>
+        public void QuerySDFBatchAsync(Vector3[] positions, ExcavationManager excavationManager, Action<float[]> callback)
+        {
+            if (sdfQueryShader == null || excavationManager == null || excavationManager.CarveVolume == null)
+            {
+                // Fallback to CPU queries
+                float[] results = new float[positions.Length];
+                for (int i = 0; i < positions.Length; i++)
+                {
+                    results[i] = GetSceneSDF(positions[i], excavationManager);
+                }
+                callback?.Invoke(results);
+                return;
+            }
+
+            if (queryInFlight)
+            {
+                Debug.LogWarning("[StratigraphyEvaluator] GPU query already in flight, discarding request");
+                return;
+            }
+
+            int count = positions.Length;
+
+            // Create or resize buffers
+            if (queryPositionsBuffer == null || queryPositionsBuffer.count != count)
+            {
+                queryPositionsBuffer?.Release();
+                queryResultsBuffer?.Release();
+                queryPositionsBuffer = new ComputeBuffer(count, sizeof(float) * 4);
+                queryResultsBuffer = new ComputeBuffer(count, sizeof(float));
+            }
+
+            // Upload positions (convert to Vector4 for GPU)
+            Vector4[] positionsV4 = new Vector4[count];
+            for (int i = 0; i < count; i++)
+            {
+                positionsV4[i] = new Vector4(positions[i].x, positions[i].y, positions[i].z, 0);
+            }
+            queryPositionsBuffer.SetData(positionsV4);
+
+            // Set up compute shader
+            var settings = excavationManager.Settings;
+            int kernel = sdfQueryShader.FindKernel("CSQuerySDF");
+
+            sdfQueryShader.SetBuffer(kernel, "_QueryPositions", queryPositionsBuffer);
+            sdfQueryShader.SetBuffer(kernel, "_QueryResults", queryResultsBuffer);
+            sdfQueryShader.SetTexture(kernel, "_CarveVolume", excavationManager.CarveVolume);
+            sdfQueryShader.SetVector("_VolumeOrigin", settings.worldOrigin);
+            sdfQueryShader.SetVector("_VolumeSize", settings.worldSize);
+            sdfQueryShader.SetFloat("_BaseTerrainY", baseTerrainY);
+            sdfQueryShader.SetInt("_QueryCount", count);
+
+            // Dispatch
+            int threadGroups = Mathf.CeilToInt(count / 64.0f);
+            sdfQueryShader.Dispatch(kernel, threadGroups, 1, 1);
+
+            // Request async readback
+            queryInFlight = true;
+            pendingCallback = callback;
+            pendingQueryResults = new float[count];
+
+            AsyncGPUReadback.Request(queryResultsBuffer, (request) =>
+            {
+                queryInFlight = false;
+
+                if (request.hasError)
+                {
+                    Debug.LogError("[StratigraphyEvaluator] GPU query readback failed");
+                    pendingCallback?.Invoke(null);
+                    return;
+                }
+
+                // Copy results
+                var data = request.GetData<float>();
+                data.CopyTo(pendingQueryResults);
+
+                pendingCallback?.Invoke(pendingQueryResults);
+                pendingCallback = null;
+            });
+        }
+
+        /// <summary>
+        /// Check if a GPU query is currently in flight.
+        /// </summary>
+        public bool IsQueryInFlight => queryInFlight;
+
+        private void OnDestroy()
+        {
+            queryPositionsBuffer?.Release();
+            queryResultsBuffer?.Release();
+        }
+
+        #endregion
+
+        #region Player Grounding
+
+        /// <summary>
+        /// Ground a player/character to the excavated terrain surface.
+        /// Traces downward from the given position to find the surface.
+        /// TODO: Implement full grounding logic with slope handling and collision response.
+        /// </summary>
+        /// <param name="position">Starting position (typically player feet)</param>
+        /// <param name="excavationManager">Reference to the excavation manager</param>
+        /// <param name="maxTraceDistance">Maximum distance to trace downward</param>
+        /// <returns>Grounded position on the surface, or original position if no surface found</returns>
+        public Vector3 GroundPlayer(Vector3 position, ExcavationManager excavationManager, float maxTraceDistance = 10f)
+        {
+            // TODO: Implement proper grounding with:
+            // - GPU-accelerated SDF queries for performance
+            // - Slope angle limits
+            // - Step-up/step-down thresholds
+            // - Integration with character controller
+
+            // For now, use simple sphere trace downward
+            var hit = SphereTrace(position, Vector3.down, maxTraceDistance, excavationManager);
+
+            if (hit.isHit)
+            {
+                return hit.position;
+            }
+
+            return position;
+        }
+
+        #endregion
 
         void OnDrawGizmos()
         {

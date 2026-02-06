@@ -21,11 +21,8 @@ namespace Excavation.Core
         public float voxelSize = 0.05f; // 5cm default
 
         [Header("Texture Configuration")]
-        [Tooltip("Texture format for the SDF volume")]
-        public TextureFormat textureFormat = TextureFormat.R16_SFloat;
-
-        [Tooltip("Maximum MIP level for hierarchical raymarching (auto-calculated from resolution)")]
-        public int maxMipLevel = 4;
+        // Note: Only R16_SFloat (16-bit float) is supported for the SDF volume.
+        // R8_SNorm was considered but requires distance remapping and reduces precision.
 
         [Header("Rendering Parameters")]
         [Tooltip("Maximum raymarching steps before giving up")]
@@ -40,9 +37,9 @@ namespace Excavation.Core
         [Range(0.0001f, 0.01f)]
         public float surfaceThreshold = 0.001f;
 
-        [Tooltip("Scale factor for triplanar texture mapping")]
+        [Tooltip("Tiling factor for triplanar texture mapping (higher = smaller tiles)")]
         [Range(0.1f, 10f)]
-        public float textureScale = 1.0f;
+        public float textureTiling = 1.0f;
 
         [Tooltip("Sharpness of triplanar texture blending (higher = sharper transitions)")]
         [Range(1f, 64f)]
@@ -78,15 +75,23 @@ namespace Excavation.Core
             {
                 Debug.LogWarning($"[ExcavationVolumeSettings] Very high resolution: {resolution} ({totalVoxels:N0} voxels). This may impact performance.");
             }
+
+            // Auto-calculate max MIP level based on smallest dimension
+            int minDim = Mathf.Min(resolution.x, Mathf.Min(resolution.y, resolution.z));
+            int calculatedMaxMip = Mathf.FloorToInt(Mathf.Log(minDim, 2));
+            if (calculatedMaxMip < 1) calculatedMaxMip = 1;
+            // Store for runtime use (read via GetMaxMipLevel())
         }
 
         /// <summary>
-        /// Get the texture format enum.
+        /// Calculate the maximum MIP level based on volume resolution.
         /// </summary>
-        public enum TextureFormat
+        public int GetMaxMipLevel()
         {
-            R16_SFloat,  // 16-bit float (recommended)
-            R8_SNorm     // 8-bit signed normalized (-1 to +1 range)
+            Vector3Int resolution = GetTextureResolution();
+            int minDim = Mathf.Min(resolution.x, Mathf.Min(resolution.y, resolution.z));
+            int maxMip = Mathf.FloorToInt(Mathf.Log(minDim, 2));
+            return Mathf.Max(1, Mathf.Min(maxMip, 8)); // Clamp between 1 and 8
         }
     }
 }

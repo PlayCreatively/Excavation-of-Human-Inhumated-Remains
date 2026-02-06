@@ -4,6 +4,9 @@
 #ifndef EXCAVATION_SDF_COMMON
 #define EXCAVATION_SDF_COMMON
 
+// Include shared geometry SDF functions (single source of truth)
+#include "SDFGeometry.hlsl"
+
 // SDF Combination Operations
 
 float SDFUnion(float a, float b)
@@ -27,14 +30,7 @@ float SDFSmoothMin(float a, float b, float k)
     return lerp(b, a, h) - k * h * (1.0 - h);
 }
 
-// Layer Geometry SDFs
-
-float DepthBandSDF(float3 worldPos, float topY, float bottomY)
-{
-    float dTop = topY - worldPos.y;
-    float dBot = worldPos.y - bottomY;
-    return max(-dTop, -dBot);
-}
+// Note: DepthBandSDF is now defined in SDFGeometry.hlsl
 
 float SphereSDF(float3 worldPos, float3 center, float radius)
 {

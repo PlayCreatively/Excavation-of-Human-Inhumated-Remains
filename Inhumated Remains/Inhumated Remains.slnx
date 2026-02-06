@@ -1,0 +1,5 @@
+﻿<Solution>
+  <Project Path="Excavation.Editor.csproj" />
+  <Project Path="Excavation.csproj" />
+  <Project Path="Assembly-CSharp.csproj" />
+</Solution>

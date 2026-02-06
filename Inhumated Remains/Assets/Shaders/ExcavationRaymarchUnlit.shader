@@ -37,8 +37,10 @@ Shader "Excavation/ExcavationRaymarchUnlit"
         [NoScaleOffset] _LayerAlbedo7("Layer 7 Albedo", 2D) = "white" {}
         [NoScaleOffset] _LayerNormal7("Layer 7 Normal", 2D) = "bump" {}
 
-        _TextureScale("Texture Scale", Float) = 1.0
+        _TextureTiling("Texture Tiling", Float) = 1.0
         _TextureSharpness("Texture Sharpness", Float) = 8.0
+        _MaxMipLevel("Max MIP Level", Int) = 4
+        _AmbientIntensity("Ambient Intensity", Range(0, 1)) = 0.1
         
         // Self-shadowing
         [Toggle] _EnableSelfShadows("Enable Self Shadows", Float) = 0
@@ -67,7 +69,7 @@ Shader "Excavation/ExcavationRaymarchUnlit"
 
             ZWrite On
             ZTest LEqual
-            Cull Back 
+            Cull Front
             
             HLSLPROGRAM
             #pragma vertex vert
@@ -117,12 +119,16 @@ Shader "Excavation/ExcavationRaymarchUnlit"
             float _BaseTerrainY;
             int _LayerCount;
 
-            float _TextureScale;
+            float _TextureTiling;
             float _TextureSharpness;
+            int _MaxMipLevel;
+            float _AmbientIntensity;
             
             // Layer data arrays
             float4 _LayerColors[8];
             float4 _LayerParams[8];
+            float4 _LayerParams2[8]; // Additional geometry params (noise, etc.)
+            int _GeometryTypes[8];   // Geometry type per layer
             
             // Shadow parameters
             float _EnableSelfShadows;
@@ -170,7 +176,16 @@ Shader "Excavation/ExcavationRaymarchUnlit"
                     return baseSDF;
                 }
                 
-                float carveSDF = _CarveVolume.SampleLevel(sampler_point_clamp, uvw, mipLevel).r;
+                // Use linear sampling at MIP 0 for smooth surfaces, point sampling at higher MIPs for speed
+                float carveSDF;
+                if (mipLevel == 0)
+                {
+                    carveSDF = _CarveVolume.SampleLevel(sampler_linear_clamp, uvw, 0).r;
+                }
+                else
+                {
+                    carveSDF = _CarveVolume.SampleLevel(sampler_point_clamp, uvw, mipLevel).r;
+                }
                 
                 // Subtract carve from base
                 return max(baseSDF, -carveSDF);
@@ -197,14 +212,14 @@ Shader "Excavation/ExcavationRaymarchUnlit"
                 float4 texColor = float4(1,1,1,1);
 
                 // Manual switch because we can't index Texture objects dynamically easily without array resource
-                if(index == 0) texColor = TriplanarSample(_LayerAlbedo0, sampler_linear_repeat, pos, normal, _TextureScale, _TextureSharpness);
-                else if(index == 1) texColor = TriplanarSample(_LayerAlbedo1, sampler_linear_repeat, pos, normal, _TextureScale, _TextureSharpness);
-                else if(index == 2) texColor = TriplanarSample(_LayerAlbedo2, sampler_linear_repeat, pos, normal, _TextureScale, _TextureSharpness);
-                else if(index == 3) texColor = TriplanarSample(_LayerAlbedo3, sampler_linear_repeat, pos, normal, _TextureScale, _TextureSharpness);
-                else if(index == 4) texColor = TriplanarSample(_LayerAlbedo4, sampler_linear_repeat, pos, normal, _TextureScale, _TextureSharpness);
-                else if(index == 5) texColor = TriplanarSample(_LayerAlbedo5, sampler_linear_repeat, pos, normal, _TextureScale, _TextureSharpness);
-                else if(index == 6) texColor = TriplanarSample(_LayerAlbedo6, sampler_linear_repeat, pos, normal, _TextureScale, _TextureSharpness);
-                else if(index == 7) texColor = TriplanarSample(_LayerAlbedo7, sampler_linear_repeat, pos, normal, _TextureScale, _TextureSharpness);
+                if(index == 0) texColor = TriplanarSample(_LayerAlbedo0, sampler_linear_repeat, pos, normal, _TextureTiling, _TextureSharpness);
+                else if(index == 1) texColor = TriplanarSample(_LayerAlbedo1, sampler_linear_repeat, pos, normal, _TextureTiling, _TextureSharpness);
+                else if(index == 2) texColor = TriplanarSample(_LayerAlbedo2, sampler_linear_repeat, pos, normal, _TextureTiling, _TextureSharpness);
+                else if(index == 3) texColor = TriplanarSample(_LayerAlbedo3, sampler_linear_repeat, pos, normal, _TextureTiling, _TextureSharpness);
+                else if(index == 4) texColor = TriplanarSample(_LayerAlbedo4, sampler_linear_repeat, pos, normal, _TextureTiling, _TextureSharpness);
+                else if(index == 5) texColor = TriplanarSample(_LayerAlbedo5, sampler_linear_repeat, pos, normal, _TextureTiling, _TextureSharpness);
+                else if(index == 6) texColor = TriplanarSample(_LayerAlbedo6, sampler_linear_repeat, pos, normal, _TextureTiling, _TextureSharpness);
+                else if(index == 7) texColor = TriplanarSample(_LayerAlbedo7, sampler_linear_repeat, pos, normal, _TextureTiling, _TextureSharpness);
                 
                 albedo = texColor.rgb;
             }
@@ -221,11 +236,12 @@ Shader "Excavation/ExcavationRaymarchUnlit"
                 
                 for (int i = 0; i < _LayerCount; i++)
                 {
-                    float topY = _LayerParams[i].x;
-                    float bottomY = _LayerParams[i].y;
+                    // Use shared EvaluateLayerSDF with geometry type dispatch
+                    int geomType = _GeometryTypes[i];
+                    float4 params1 = _LayerParams[i];
+                    float4 params2 = _LayerParams2[i];
                     
-                    // Simple DepthBand check
-                    float sdf = DepthBandSDF(worldPos, topY, bottomY);
+                    float sdf = EvaluateLayerSDF(worldPos, geomType, params1, params2);
                     
                     if (sdf < 0.0)
                     {
@@ -253,7 +269,7 @@ Shader "Excavation/ExcavationRaymarchUnlit"
             bool Raymarch(float3 origin, float3 dir, out float3 hitPoint, out float totalDist)
             {
                 float t = 0.0;
-                int mip = 4;
+                int mip = _MaxMipLevel;
                 
                 for (int i = 0; i < _MaxSteps; i++)
                 {
@@ -367,7 +383,7 @@ Shader "Excavation/ExcavationRaymarchUnlit"
                 float ndotl = max(0.0, dot(normal, L));
                 float shadow = ComputeSoftShadow(hitPoint, normal, L);
                 
-                float3 ambient = albedo * 0.1;
+                float3 ambient = albedo * _AmbientIntensity;
                 float3 diffuse = albedo * _MainLightColor.rgb * ndotl * shadow;
                 
                 o.color = float4(ambient + diffuse + emission, 1.0);

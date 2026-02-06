@@ -1,0 +1,133 @@
+// SDFQuery.compute - GPU-accelerated SDF queries for CPU collision/grounding
+// Uses shared SDFGeometry.hlsl for consistent SDF evaluation
+
+#pragma kernel CSQuerySDF
+#pragma kernel CSQueryMaterial
+
+#include "Shaders/SDFGeometry.hlsl"
+
+// ============================================================================
+// BUFFERS
+// ============================================================================
+
+// Input: Query points in world space
+StructuredBuffer<float3> QueryPoints;
+
+// Output: SDF values at each query point
+RWStructuredBuffer<float> SDFResults;
+
+// Output: Material layer indices (-1 = no layer, 0-7 = layer index)
+RWStructuredBuffer<int> MaterialResults;
+
+// Query count
+uint QueryCount;
+
+// ============================================================================
+// CARVE VOLUME
+// ============================================================================
+
+Texture3D<float> CarveVolume;
+SamplerState sampler_CarveVolume;
+
+float3 VolumeOrigin;
+float3 VolumeSize;
+float VoxelSize;
+float BaseTerrainY;
+
+// ============================================================================
+// LAYER DATA (matches shader format)
+// ============================================================================
+
+int LayerCount;
+int GeometryTypes[8];
+float4 LayerParams[8];
+float4 LayerParams2[8];
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+float3 WorldToUVW(float3 worldPos)
+{
+    float3 local = worldPos - VolumeOrigin;
+    return local / VolumeSize;
+}
+
+float SampleCarveVolume(float3 worldPos)
+{
+    float3 uvw = WorldToUVW(worldPos);
+    
+    // If outside volume bounds, return large positive (no excavation)
+    if (any(uvw < 0.0) || any(uvw > 1.0))
+    {
+        return 9999.0;
+    }
+    
+    return CarveVolume.SampleLevel(sampler_CarveVolume, uvw, 0).r;
+}
+
+float EvaluateBaseTerrain(float3 worldPos)
+{
+    // Start with flat ground at BaseTerrainY
+    float baseSDF = worldPos.y - BaseTerrainY;
+    
+    // Apply layer modifications (Union/Subtract operations)
+    // Note: Currently we only apply Inside operation check, not terrain modification
+    // Full terrain modification would require iterating layers with Union/Subtract ops
+    
+    return baseSDF;
+}
+
+float EvaluateSceneSDF(float3 worldPos)
+{
+    float baseSDF = EvaluateBaseTerrain(worldPos);
+    float carveSDF = SampleCarveVolume(worldPos);
+    
+    // Boolean subtraction: max(base, -carve)
+    return max(baseSDF, -carveSDF);
+}
+
+// ============================================================================
+// KERNELS
+// ============================================================================
+
+/// <summary>
+/// Query scene SDF at each point.
+/// Used for collision detection, grounding, etc.
+/// </summary>
+[numthreads(64, 1, 1)]
+void CSQuerySDF(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= QueryCount)
+        return;
+    
+    float3 worldPos = QueryPoints[id.x];
+    SDFResults[id.x] = EvaluateSceneSDF(worldPos);
+}
+
+/// <summary>
+/// Query which material layer each point is inside.
+/// Used for determining dig speed, audio feedback, etc.
+/// </summary>
+[numthreads(64, 1, 1)]
+void CSQueryMaterial(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= QueryCount)
+        return;
+    
+    float3 worldPos = QueryPoints[id.x];
+    
+    // Find first containing layer (youngest to oldest)
+    int result = -1;
+    for (int i = 0; i < LayerCount && i < 8; i++)
+    {
+        float sdf = EvaluateLayerSDF(worldPos, GeometryTypes[i], LayerParams[i], LayerParams2[i]);
+        if (sdf < 0.0)
+        {
+            result = i;
+            break;
+        }
+    }
+    
+    MaterialResults[id.x] = result;
+}

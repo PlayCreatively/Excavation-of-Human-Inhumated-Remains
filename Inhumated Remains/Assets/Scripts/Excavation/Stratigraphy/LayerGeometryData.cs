@@ -13,6 +13,27 @@ namespace Excavation.Stratigraphy
     }
 
     /// <summary>
+    /// Geometry type IDs for GPU evaluation.
+    /// MUST match constants in SDFGeometry.hlsl!
+    /// </summary>
+    public enum LayerGeometryType
+    {
+        DepthBand = 0,
+        NoisyDepthBand = 1,
+        Cut = 2,
+        Ellipsoid = 3
+    }
+
+    // TODO: Fill Geometry
+    // A Fill geometry could reference an existing Cut geometry and override its material.
+    // This would allow modeling pit fills, ditch fills, etc. that share the same shape
+    // as their cut but have different material properties.
+    // Implementation would need to:
+    // 1. Add FillGeometry class that references a CutGeometry
+    // 2. In layer ordering, ensure fill comes before cut (younger)
+    // 3. Fill's SDF would delegate to the referenced cut's SDF
+
+    /// <summary>
     /// Abstract base class for layer geometry definitions.
     /// Uses signed distance fields (SDF) to define layer boundaries.
     /// </summary>
@@ -21,6 +42,23 @@ namespace Excavation.Stratigraphy
     {
         [Tooltip("How this layer interacts with the base terrain")]
         public LayerOperation operation = LayerOperation.Inside;
+
+        /// <summary>
+        /// Get the geometry type ID for GPU evaluation.
+        /// </summary>
+        public abstract LayerGeometryType GeometryType { get; }
+
+        /// <summary>
+        /// Pack primary parameters for GPU (float4).
+        /// Layout depends on geometry type - see SDFGeometry.hlsl for packing spec.
+        /// </summary>
+        public abstract Vector4 GetPackedParams();
+
+        /// <summary>
+        /// Pack secondary parameters for GPU (float4).
+        /// Layout depends on geometry type - see SDFGeometry.hlsl for packing spec.
+        /// </summary>
+        public abstract Vector4 GetPackedParams2();
 
         /// <summary>
         /// Evaluate the signed distance to the layer boundary.

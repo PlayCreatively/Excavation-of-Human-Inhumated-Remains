@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.Rendering;
+using System;
 using System.IO;
 using System.IO.Compression;
 
@@ -18,7 +19,7 @@ namespace Excavation.Core
 
         // The 3D SDF texture
         private RenderTexture carveVolume;
-        
+
         // Cached shader kernel IDs
         private int carveKernel;
         private int mipGenKernel;
@@ -26,8 +27,13 @@ namespace Excavation.Core
         // Texture resolution
         private Vector3Int resolution;
 
+        // Serialization state
+        private bool serializationInProgress = false;
+        private ComputeBuffer serializationBuffer;
+
         public RenderTexture CarveVolume => carveVolume;
         public ExcavationVolumeSettings Settings => settings;
+        public bool IsSerializationInProgress => serializationInProgress;
 
         void Start()
         {
@@ -86,14 +92,14 @@ namespace Excavation.Core
             // Use a simple compute shader to fill with 9999.0
             // For now, we'll use Graphics.Blit with a material (simpler for initialization)
             // In production, use a dedicated compute shader for better performance
-            
+
             ComputeShader initShader = Resources.Load<ComputeShader>("Shaders/InitializeVolume");
             if (initShader != null)
             {
                 int kernel = initShader.FindKernel("CSInitialize");
                 initShader.SetTexture(kernel, "Result", carveVolume);
                 initShader.SetFloat("InitValue", 9999.0f);
-                
+
                 int threadGroups = Mathf.CeilToInt(resolution.x / 8f);
                 initShader.Dispatch(kernel, threadGroups, threadGroups, threadGroups);
             }
@@ -168,14 +174,20 @@ namespace Excavation.Core
             {
                 mipGenShader.SetTexture(mipGenKernel, "SourceMip", carveVolume, mip - 1);
                 mipGenShader.SetTexture(mipGenKernel, "DestMip", carveVolume, mip);
-                
+
                 float parentVoxelSize = settings.voxelSize * Mathf.Pow(2, mip);
                 mipGenShader.SetFloat("ParentVoxelSize", parentVoxelSize);
 
-                int mipRes = Mathf.Max(1, resolution.x >> mip);
-                int groups = Mathf.CeilToInt(mipRes / 8f);
-                
-                mipGenShader.Dispatch(mipGenKernel, groups, groups, groups);
+                // Calculate separate dispatch counts for non-cubic volumes
+                int mipResX = Mathf.Max(1, resolution.x >> mip);
+                int mipResY = Mathf.Max(1, resolution.y >> mip);
+                int mipResZ = Mathf.Max(1, resolution.z >> mip);
+
+                int groupsX = Mathf.Max(1, Mathf.CeilToInt(mipResX / 8f));
+                int groupsY = Mathf.Max(1, Mathf.CeilToInt(mipResY / 8f));
+                int groupsZ = Mathf.Max(1, Mathf.CeilToInt(mipResZ / 8f));
+
+                mipGenShader.Dispatch(mipGenKernel, groupsX, groupsY, groupsZ);
             }
         }
 
@@ -205,74 +217,210 @@ namespace Excavation.Core
         }
 
         /// <summary>
-        /// Serialize the carve volume to compressed byte array.
+        /// Serialize the carve volume to compressed byte array asynchronously.
+        /// Uses AsyncGPUReadback to avoid stalling the GPU pipeline.
         /// </summary>
+        /// <param name="callback">Called with compressed data when complete, or null on failure</param>
+        public void SerializeVolumeAsync(Action<byte[]> callback)
+        {
+            if (carveVolume == null)
+            {
+                callback?.Invoke(null);
+                return;
+            }
+
+            if (serializationInProgress)
+            {
+                Debug.LogWarning("[ExcavationManager] Serialization already in progress");
+                callback?.Invoke(null);
+                return;
+            }
+
+            serializationInProgress = true;
+
+            // Request async readback of MIP 0
+            // Note: AsyncGPUReadback.Request for 3D textures reads the full volume
+            // Use the overload that accepts (Texture, int, Action<AsyncGPUReadbackRequest>)
+            AsyncGPUReadback.Request(carveVolume, 0, (request) =>
+            {
+                serializationInProgress = false;
+
+                if (request.hasError)
+                {
+                    Debug.LogError("[ExcavationManager] GPU readback failed during serialization");
+                    callback?.Invoke(null);
+                    return;
+                }
+
+                try
+                {
+                    // Get the raw float data
+                    var data = request.GetData<float>();
+                    byte[] rawData = new byte[data.Length * sizeof(float)];
+
+                    // Copy to byte array (safe managed copy)
+                    {
+                        float[] floatArray = data.ToArray();
+                        Buffer.BlockCopy(floatArray, 0, rawData, 0, rawData.Length);
+                    }
+
+                    // Compress using GZip
+                    using var outputStream = new MemoryStream();
+                    using (var gzipStream = new GZipStream(outputStream, CompressionMode.Compress))
+                    {
+                        gzipStream.Write(rawData, 0, rawData.Length);
+                    }
+                    callback?.Invoke(outputStream.ToArray());
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[ExcavationManager] Serialization failed: {e.Message}");
+                    callback?.Invoke(null);
+                }
+            });
+        }
+
+        /// <summary>
+        /// Synchronous serialize - blocks until complete.
+        /// Prefer SerializeVolumeAsync for better performance.
+        /// </summary>
+        [Obsolete("Use SerializeVolumeAsync for non-blocking serialization")]
         public byte[] SerializeVolume()
         {
             if (carveVolume == null) return null;
 
-            // Read texture data from GPU
-            RenderTexture.active = carveVolume;
-            Texture2D temp2D = new Texture2D(resolution.x, resolution.y, TextureFormat.RFloat, false, true);
-            float[] volumeData = new float[resolution.x * resolution.y * resolution.z];
+            // Force sync readback - not recommended for production
+            byte[] result = null;
+            bool done = false;
 
-            for (int z = 0; z < resolution.z; z++)
+            SerializeVolumeAsync((data) =>
             {
-                // Copy each slice to a temporary 2D texture
-                Graphics.CopyTexture(carveVolume, 0, z, temp2D, 0, 0);
-                temp2D.Apply();
-                var sliceData = temp2D.GetRawTextureData<float>();
-                System.Buffer.BlockCopy(sliceData.ToArray(), 0, volumeData, (z * resolution.x * resolution.y) * sizeof(float), resolution.x * resolution.y * sizeof(float));
-            }
-            RenderTexture.active = null;
-            Object.Destroy(temp2D);
+                result = data;
+                done = true;
+            });
 
-            // Convert float array to byte array
-            byte[] rawData = new byte[volumeData.Length * sizeof(float)];
-            System.Buffer.BlockCopy(volumeData, 0, rawData, 0, rawData.Length);
-
-            // Compress using GZip
-            using (var outputStream = new MemoryStream())
+            // Spin wait - bad for performance but maintains API compatibility
+            int timeout = 10000; // 10 second timeout
+            while (!done && timeout > 0)
             {
-                using (var gzipStream = new GZipStream(outputStream, CompressionMode.Compress))
-                {
-                    gzipStream.Write(rawData, 0, rawData.Length);
-                }
-                return outputStream.ToArray();
+                System.Threading.Thread.Sleep(1);
+                timeout--;
             }
+
+            return result;
         }
 
         /// <summary>
         /// Load volume from compressed byte array.
+        /// Creates a Texture3D on CPU and copies to RenderTexture.
         /// </summary>
         public void LoadVolume(byte[] compressedData)
         {
             if (compressedData == null || carveVolume == null) return;
 
-            // Decompress
-            using (var inputStream = new MemoryStream(compressedData))
-            using (var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress))
-            using (var outputStream = new MemoryStream())
+            try
             {
-                gzipStream.CopyTo(outputStream);
-                byte[] rawData = outputStream.ToArray();
+                // Decompress
+                using (var inputStream = new MemoryStream(compressedData))
+                using (var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress))
+                using (var outputStream = new MemoryStream())
+                {
+                    gzipStream.CopyTo(outputStream);
+                    byte[] rawData = outputStream.ToArray();
 
-                // Apply to texture
-                Texture3D temp = new Texture3D(resolution.x, resolution.y, resolution.z, TextureFormat.RFloat, false);
-                // Set pixels manually since LoadRawTextureData is not available for Texture3D
-                Color[] colors = new Color[resolution.x * resolution.y * resolution.z];
-                System.Buffer.BlockCopy(rawData, 0, colors, 0, rawData.Length);
-                temp.SetPixels(colors);
-                temp.Apply();
+                    // Validate data size
+                    int expectedSize = resolution.x * resolution.y * resolution.z * sizeof(float);
+                    if (rawData.Length != expectedSize)
+                    {
+                        Debug.LogError($"[ExcavationManager] Volume data size mismatch. Expected {expectedSize}, got {rawData.Length}");
+                        return;
+                    }
 
-                // Copy to RenderTexture
-                Graphics.CopyTexture(temp, carveVolume);
-                Destroy(temp);
+                    // Convert bytes to float array
+                    float[] floatData = new float[resolution.x * resolution.y * resolution.z];
+                    System.Buffer.BlockCopy(rawData, 0, floatData, 0, rawData.Length);
 
-                // Regenerate MIPs
-                RegenerateMips();
+                    // Create Texture3D with the data
+                    Texture3D temp = new Texture3D(resolution.x, resolution.y, resolution.z, TextureFormat.RFloat, false);
+                    temp.SetPixelData(floatData, 0);
+                    temp.Apply(false, false);
+
+                    // Copy to RenderTexture (this works because both use RFloat format)
+                    Graphics.CopyTexture(temp, carveVolume);
+                    Destroy(temp);
+
+                    // Regenerate MIPs
+                    RegenerateMips();
+
+                    Debug.Log("[ExcavationManager] Volume loaded successfully");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ExcavationManager] Failed to load volume: {e.Message}");
             }
         }
+
+        #region Public Save/Load API
+
+        /// <summary>
+        /// Save the excavation volume to a file asynchronously.
+        /// </summary>
+        /// <param name="filePath">Full path to save file</param>
+        /// <param name="callback">Called with success status when complete</param>
+        public void SaveExcavation(string filePath, Action<bool> callback = null)
+        {
+            SerializeVolumeAsync((data) =>
+            {
+                if (data == null)
+                {
+                    Debug.LogError("[ExcavationManager] Failed to serialize volume for save");
+                    callback?.Invoke(false);
+                    return;
+                }
+
+                try
+                {
+                    File.WriteAllBytes(filePath, data);
+                    Debug.Log($"[ExcavationManager] Excavation saved to: {filePath}");
+                    callback?.Invoke(true);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[ExcavationManager] Failed to save excavation: {e.Message}");
+                    callback?.Invoke(false);
+                }
+            });
+        }
+
+        /// <summary>
+        /// Load excavation volume from a file.
+        /// </summary>
+        /// <param name="filePath">Full path to load file</param>
+        /// <returns>True if load was successful</returns>
+        public bool LoadExcavation(string filePath)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    Debug.LogError($"[ExcavationManager] File not found: {filePath}");
+                    return false;
+                }
+
+                byte[] data = File.ReadAllBytes(filePath);
+                LoadVolume(data);
+                Debug.Log($"[ExcavationManager] Excavation loaded from: {filePath}");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ExcavationManager] Failed to load excavation: {e.Message}");
+                return false;
+            }
+        }
+
+        #endregion
 
         void OnDestroy()
         {
@@ -281,6 +429,8 @@ namespace Excavation.Core
                 carveVolume.Release();
                 Destroy(carveVolume);
             }
+
+            serializationBuffer?.Release();
         }
 
         void OnDrawGizmosSelected()

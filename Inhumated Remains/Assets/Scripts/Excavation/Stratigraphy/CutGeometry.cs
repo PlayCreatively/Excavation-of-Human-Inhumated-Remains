@@ -20,6 +20,20 @@ namespace Excavation.Stratigraphy
         [Range(0.1f, 5f)]
         public float depth = 1f;
 
+        public override LayerGeometryType GeometryType => LayerGeometryType.Cut;
+
+        public override Vector4 GetPackedParams()
+        {
+            // Cut: params(centreX, centreY, centreZ, radius)
+            return new Vector4(centre.x, centre.y, centre.z, radius);
+        }
+
+        public override Vector4 GetPackedParams2()
+        {
+            // Cut: params2(depth, -, -, -)
+            return new Vector4(depth, 0f, 0f, 0f);
+        }
+
         public override float SDF(Vector3 worldPos)
         {
             // Horizontal distance from center (XZ plane)

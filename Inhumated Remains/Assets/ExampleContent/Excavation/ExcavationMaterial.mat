@@ -29,10 +29,12 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _AmbientIntensity: 0.15
     - _BaseTerrainY: -0.63
     - _EnableSelfShadows: 0
     - _LayerCount: 2
     - _MaxDistance: 50
+    - _MaxMipLevel: 6
     - _MaxSteps: 128
     - _ShadowDistance: 5
     - _ShadowSoftness: 4
@@ -40,6 +42,7 @@ Material:
     - _SurfaceThreshold: 0.001
     - _TextureScale: 1
     - _TextureSharpness: 8
+    - _TextureTiling: 1
     - _VoxelSize: 0.1
     m_Colors:
     - _VolumeOrigin: {r: 0, g: -1, b: 0, a: 0}

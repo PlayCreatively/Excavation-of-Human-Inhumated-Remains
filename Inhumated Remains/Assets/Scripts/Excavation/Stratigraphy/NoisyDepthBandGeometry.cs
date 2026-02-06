@@ -26,6 +26,20 @@ namespace Excavation.Stratigraphy
         [Tooltip("Noise offset for variation between layers")]
         public Vector2 noiseOffset = Vector2.zero;
 
+        public override LayerGeometryType GeometryType => LayerGeometryType.NoisyDepthBand;
+
+        public override Vector4 GetPackedParams()
+        {
+            // NoisyDepthBand: params(baseTopY, baseBottomY, amplitude, frequency)
+            return new Vector4(baseTopY, baseBottomY, noiseAmplitude, noiseFrequency);
+        }
+
+        public override Vector4 GetPackedParams2()
+        {
+            // NoisyDepthBand: params2(offsetX, offsetZ, -, -)
+            return new Vector4(noiseOffset.x, noiseOffset.y, 0f, 0f);
+        }
+
         public override float SDF(Vector3 worldPos)
         {
             // Sample Perlin noise for this XZ position
