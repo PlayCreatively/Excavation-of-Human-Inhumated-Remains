@@ -79,16 +79,16 @@ namespace Excavation.Rendering
             Vector3[] vertices = new Vector3[]
             {
                 // Front face
-                new Vector3(-halfSize.x, -halfSize.y, -halfSize.z),
-                new Vector3( halfSize.x, -halfSize.y, -halfSize.z),
-                new Vector3( halfSize.x,  halfSize.y, -halfSize.z),
-                new Vector3(-halfSize.x,  halfSize.y, -halfSize.z),
+                new (-halfSize.x, -halfSize.y, -halfSize.z),
+                new ( halfSize.x, -halfSize.y, -halfSize.z),
+                new ( halfSize.x,  halfSize.y, -halfSize.z),
+                new (-halfSize.x,  halfSize.y, -halfSize.z),
                 
                 // Back face
-                new Vector3(-halfSize.x, -halfSize.y,  halfSize.z),
-                new Vector3( halfSize.x, -halfSize.y,  halfSize.z),
-                new Vector3( halfSize.x,  halfSize.y,  halfSize.z),
-                new Vector3(-halfSize.x,  halfSize.y,  halfSize.z),
+                new (-halfSize.x, -halfSize.y,  halfSize.z),
+                new ( halfSize.x, -halfSize.y,  halfSize.z),
+                new ( halfSize.x,  halfSize.y,  halfSize.z),
+                new (-halfSize.x,  halfSize.y,  halfSize.z),
             };
 
             int[] triangles = new int[]
@@ -140,6 +140,16 @@ namespace Excavation.Rendering
             raymarchMaterial.SetFloat("_SurfaceThreshold", settings.surfaceThreshold);
             raymarchMaterial.SetFloat("_TextureTiling", settings.textureTiling);
             raymarchMaterial.SetFloat("_TextureSharpness", settings.textureSharpness);
+
+            // Base terrain Y from stratigraphy
+            if (stratigraphy != null)
+            {
+                raymarchMaterial.SetFloat("_BaseTerrainY", stratigraphy.BaseTerrainY);
+            }
+            else
+            {
+                raymarchMaterial.SetFloat("_BaseTerrainY", 0f);
+            }
 
             // Camera position
             if (Camera.main != null)

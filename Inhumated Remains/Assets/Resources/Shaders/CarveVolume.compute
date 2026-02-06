@@ -19,7 +19,9 @@ void CSCarve (uint3 id : SV_DispatchThreadID)
     uint3 voxelIndex = MinVoxel + id;
     
     // Calculate world position of this voxel's center
-    float3 voxelWorldPos = VolumeOrigin + (voxelIndex + 0.5) * VoxelSize;
+    // VolumeOrigin is the CENTER of the volume, so we offset to get the corner first
+    float3 volumeMin = VolumeOrigin - 0.5 * VolumeSize;
+    float3 voxelWorldPos = volumeMin + (voxelIndex + 0.5) * VoxelSize;
     
     // Calculate distance from brush center
     float distanceToBrush = length(voxelWorldPos - BrushPosition);

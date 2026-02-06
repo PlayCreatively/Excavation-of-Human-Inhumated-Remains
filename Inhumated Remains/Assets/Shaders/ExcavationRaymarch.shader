@@ -222,8 +222,10 @@ Shader "Excavation/ExcavationRaymarch"
                 float baseSDF = EvaluateBaseTerrain(worldPos);
                 
                 // Convert camera-relative position to absolute world position for UVW lookup
+                // _VolumeOrigin is the CENTER of the volume
                 float3 absoluteWorldPos = worldPos + _WorldSpaceCameraPos;
-                float3 uvw = WorldToUVW(absoluteWorldPos, _VolumeOrigin, _VolumeSize);
+                float3 volumeMin = _VolumeOrigin - 0.5 * _VolumeSize;
+                float3 uvw = WorldToUVW(absoluteWorldPos, volumeMin, _VolumeSize);
 
                 // Outside volume: just return terrain
                 if (any(uvw < 0.0) || any(uvw > 1.0))
@@ -231,10 +233,12 @@ Shader "Excavation/ExcavationRaymarch"
                     return baseSDF;
                 }
 
-                // Sample carve volume (stored as positive = carved away)
+                // Sample carve volume
+                // Initial value +9999 (uncarved), becomes negative inside carved regions
                 float carveSDF = _CarveVolume.SampleLevel(sampler_point_clamp, uvw, mipLevel).r;
                 
-                // Combine: terrain minus carved regions
+                // CSG subtraction: terrain minus carved void
+                // -carveSDF flips the void, max() performs the subtraction
                 return max(baseSDF, -carveSDF);
             }
             

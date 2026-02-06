@@ -168,7 +168,9 @@ Shader "Excavation/ExcavationRaymarchUnlit"
                 float baseSDF = EvaluateBaseTerrain(worldPos);
                 
                 // Transform to volume local UVW
-                float3 uvw = WorldToUVW(worldPos, _VolumeOrigin, _VolumeSize);
+                // _VolumeOrigin is the CENTER of the volume
+                float3 volumeMin = _VolumeOrigin - 0.5 * _VolumeSize;
+                float3 uvw = WorldToUVW(worldPos, volumeMin, _VolumeSize);
                 
                 // If outside local volume bounds, assume we just have base terrain 
                 if (any(uvw < 0.0) || any(uvw > 1.0))

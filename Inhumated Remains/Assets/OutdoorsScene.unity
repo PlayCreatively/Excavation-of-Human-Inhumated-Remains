@@ -210,13 +210,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 157207112}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.38268343, y: 0, z: 0, w: 0.92387956}
+  m_LocalRotation: {x: -0.35575604, y: -0, z: -0, w: -0.9345789}
   m_LocalPosition: {x: 0, y: 3, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 45, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: -318.32, y: 0, z: 0}
 --- !u!114 &157207115
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -503,7 +503,7 @@ Transform:
   m_GameObject: {fileID: 1392983233}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 5.99}
+  m_LocalPosition: {x: 0, y: 0, z: 2.61}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -807,7 +807,7 @@ MonoBehaviour:
   stratigraphy: {fileID: 2132648384}
   toolTip: {fileID: 1392983234}
   currentBrush: {fileID: 11400000, guid: a9644cd5e30b7524cb149bac126939f0, type: 2}
-  digAction: {fileID: 1885684295}
+  digAction: {fileID: 0}
   audioSource: {fileID: 0}
   audioMinInterval: 0.1
   enableHaptics: 1
@@ -836,20 +836,6 @@ MonoBehaviour:
   upKey: 101
   downKey: 113
   boostKey: 304
---- !u!114 &1885684295
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fc1515ab76e54f068e2f2207940fab32, type: 3}
-  m_Name: UI/Click
-  m_EditorClassIdentifier: Unity.InputSystem::UnityEngine.InputSystem.InputActionReference
-  m_Asset: {fileID: -944628639613478452, guid: 35845fe01580c41289b024647b1d1c53, type: 3}
-  m_ActionId: 3c7022bf-7922-4f7c-a998-c437916075ad
 --- !u!1 &2013410473
 GameObject:
   m_ObjectHideFlags: 1
@@ -931,8 +917,8 @@ MonoBehaviour:
   layers:
   - {fileID: 11400000, guid: 8646042a5385a6143a13d112acc19960, type: 2}
   - {fileID: 11400000, guid: d3b8c92c0f00de244960be41faee4d88, type: 2}
-  defaultSubstrate: {fileID: 11400000, guid: d3b8c92c0f00de244960be41faee4d88, type: 2}
-  baseTerrainY: -0.63
+  defaultSubstrate: {fileID: 0}
+  baseTerrainY: -0.11
   drawGizmos: 1
   debugSphereTrace: 1
   debugPosition: {x: 0, y: 0, z: 0}

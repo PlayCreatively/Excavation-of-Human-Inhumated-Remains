@@ -193,10 +193,12 @@ namespace Excavation.Core
 
         /// <summary>
         /// Convert world position to voxel coordinates.
+        /// worldOrigin is the CENTER of the volume.
         /// </summary>
         public Vector3Int WorldToVoxel(Vector3 worldPos)
         {
-            Vector3 local = worldPos - settings.worldOrigin;
+            Vector3 volumeMin = settings.worldOrigin - settings.worldSize * 0.5f;
+            Vector3 local = worldPos - volumeMin;
             return new Vector3Int(
                 Mathf.FloorToInt(local.x / settings.voxelSize),
                 Mathf.FloorToInt(local.y / settings.voxelSize),
@@ -206,10 +208,12 @@ namespace Excavation.Core
 
         /// <summary>
         /// Convert voxel coordinates to world position (voxel center).
+        /// worldOrigin is the CENTER of the volume.
         /// </summary>
         public Vector3 VoxelToWorld(Vector3Int voxel)
         {
-            return settings.worldOrigin + new Vector3(
+            Vector3 volumeMin = settings.worldOrigin - settings.worldSize * 0.5f;
+            return volumeMin + new Vector3(
                 (voxel.x + 0.5f) * settings.voxelSize,
                 (voxel.y + 0.5f) * settings.voxelSize,
                 (voxel.z + 0.5f) * settings.voxelSize
@@ -437,10 +441,10 @@ namespace Excavation.Core
         {
             if (settings == null) return;
 
-            // Draw volume bounds
+            // Draw volume bounds (worldOrigin is center)
             Gizmos.color = Color.cyan;
             Gizmos.DrawWireCube(
-                settings.worldOrigin + settings.worldSize * 0.5f,
+                settings.worldOrigin,
                 settings.worldSize
             );
         }

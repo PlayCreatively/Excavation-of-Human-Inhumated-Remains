@@ -18,7 +18,7 @@ namespace Excavation.Tools
 
         [Header("Input")]
         [SerializeField] private InputActionReference digAction;
-        
+
         [Header("Audio")]
         [SerializeField] private AudioSource audioSource;
         [SerializeField] private float audioMinInterval = 0.1f;
@@ -60,6 +60,7 @@ namespace Excavation.Tools
 
             if (isDigging)
             {
+                Debug.Log("[DigTool] Digging...");
                 PerformDig();
             }
         }
@@ -107,7 +108,7 @@ namespace Excavation.Tools
             if (hit.isHit)
             {
                 float distanceToSurface = Vector3.Distance(tipPosition, hit.position);
-                
+
                 if (distanceToSurface < currentBrush.radius * 2f)
                 {
                     // Apply hardness modifier from material
@@ -164,7 +165,7 @@ namespace Excavation.Tools
             if (gamepad != null)
             {
                 gamepad.SetMotorSpeeds(hapticIntensity, hapticIntensity);
-                
+
                 // Stop after a short duration (done in coroutine ideally)
                 Invoke(nameof(StopHaptics), 0.05f);
             }

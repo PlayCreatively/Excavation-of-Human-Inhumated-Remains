@@ -10,7 +10,7 @@ namespace Excavation.Core
     public class ExcavationVolumeSettings : ScriptableObject
     {
         [Header("Volume Bounds")]
-        [Tooltip("World-space origin point (bottom-left-front corner)")]
+        [Tooltip("World-space center point of the excavation volume")]
         public Vector3 worldOrigin = Vector3.zero;
 
         [Tooltip("World-space size of the excavation volume")]
