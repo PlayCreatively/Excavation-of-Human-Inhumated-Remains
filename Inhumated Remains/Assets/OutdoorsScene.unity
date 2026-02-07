@@ -918,7 +918,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 8646042a5385a6143a13d112acc19960, type: 2}
   - {fileID: 11400000, guid: d3b8c92c0f00de244960be41faee4d88, type: 2}
   defaultSubstrate: {fileID: 0}
-  baseTerrainY: -0.11
+  baseTerrainY: -0.08
   drawGizmos: 1
   debugSphereTrace: 1
   debugPosition: {x: 0, y: 0, z: 0}

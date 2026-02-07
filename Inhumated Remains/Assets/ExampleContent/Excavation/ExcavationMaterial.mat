@@ -30,7 +30,8 @@ Material:
     m_Ints: []
     m_Floats:
     - _AmbientIntensity: 0.15
-    - _BaseTerrainY: -0.11
+    - _BaseTerrainY: -0.08
+    - _DiffuseIntensity: 1
     - _EnableSelfShadows: 0
     - _LayerCount: 2
     - _MaxDistance: 50

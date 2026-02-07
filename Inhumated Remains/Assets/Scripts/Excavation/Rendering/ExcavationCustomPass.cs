@@ -175,8 +175,13 @@ namespace Excavation.Rendering
 
             if (mainLight != null)
             {
+                // Light's forward = direction light shines (toward surface)
+                // Shader NdotL needs direction FROM surface TOWARD light, so negate it
                 raymarchMaterial.SetVector("_MainLightDirection", mainLight.transform.forward);
-                raymarchMaterial.SetColor("_MainLightColor", mainLight.color * mainLight.intensity);
+                // IMPORTANT: In HDRP, mainLight.intensity is in physical units (lux) and can be
+                // enormous (e.g. 130,000 for a sun). We pass only the normalized color here;
+                // the shader's _DiffuseIntensity slider controls brightness instead.
+                raymarchMaterial.SetColor("_MainLightColor", mainLight.color);
             }
             else
             {
