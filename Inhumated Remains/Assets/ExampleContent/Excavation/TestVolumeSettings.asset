@@ -14,9 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Excavation::Excavation.Core.ExcavationVolumeSettings
   worldOrigin: {x: 0, y: 0, z: 0}
   worldSize: {x: 15, y: 9, z: 15}
-  voxelSize: 0.09
-  maxRaymarchSteps: 128
-  maxRaymarchDistance: 50
-  surfaceThreshold: 0.001
-  textureTiling: 1
-  textureSharpness: 8
+  voxelSize: 0.262
+  maxRaymarchSteps: 95
+  maxRaymarchDistance: 21.3
+  surfaceThreshold: 0.0032
+  textureTiling: 2.55
+  textureSharpness: 6

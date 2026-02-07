@@ -1,5 +1,6 @@
 using UnityEngine;
 
+[DefaultExecutionOrder(-100)]
 public class FlyCamera : MonoBehaviour
 {
 	[Header("Movement Settings")]

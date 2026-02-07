@@ -17,7 +17,7 @@ namespace Excavation.Core
         public Vector3 worldSize = new Vector3(10f, 5f, 10f);
 
         [Tooltip("Size of each voxel in meters (smaller = higher resolution)")]
-        [Range(0.01f, 0.5f)]
+        [Range(0.01f, 2f)]
         public float voxelSize = 0.05f; // 5cm default
 
         [Header("Texture Configuration")]
@@ -34,7 +34,7 @@ namespace Excavation.Core
         public float maxRaymarchDistance = 50f;
 
         [Tooltip("Surface detection threshold (smaller = more precise)")]
-        [Range(0.0001f, 0.01f)]
+        [Range(0.0001f, 0.2f)]
         public float surfaceThreshold = 0.001f;
 
         [Tooltip("Tiling factor for triplanar texture mapping (higher = smaller tiles)")]

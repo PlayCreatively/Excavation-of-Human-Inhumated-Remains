@@ -144,9 +144,11 @@ namespace Excavation.Editor
                     
                     if (!string.IsNullOrEmpty(path))
                     {
-                        byte[] data = manager.SerializeVolume();
-                        System.IO.File.WriteAllBytes(path, data);
-                        Debug.Log($"[ExcavationManager] Volume saved to {path} ({data.Length / 1024f:F2} KB)");
+                        Debug.Log("Starting async save...");
+                        manager.SerializeVolumeAsync((data) => {
+                            System.IO.File.WriteAllBytes(path, data);
+                            Debug.Log($"[ExcavationManager] Volume saved to {path} ({data.Length / 1024f:F2} KB)");
+                        });
                     }
                 }
                 

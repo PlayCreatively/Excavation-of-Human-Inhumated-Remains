@@ -29,22 +29,23 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _AmbientIntensity: 0.15
+    - _AmbientIntensity: 1
     - _BaseTerrainY: -0.08
-    - _DiffuseIntensity: 1
+    - _DiffuseIntensity: 1.144
     - _EnableSelfShadows: 0
     - _LayerCount: 2
-    - _MaxDistance: 50
-    - _MaxMipLevel: 6
-    - _MaxSteps: 128
+    - _MaxDistance: 21.3
+    - _MaxMipLevel: 5
+    - _MaxSteps: 95
+    - _NormalEpsilon: 0.137
     - _ShadowDistance: 5
     - _ShadowSoftness: 4
     - _ShadowSteps: 32
-    - _SurfaceThreshold: 0.001
+    - _SurfaceThreshold: 0.0032
     - _TextureScale: 1
-    - _TextureSharpness: 8
-    - _TextureTiling: 1
-    - _VoxelSize: 0.09
+    - _TextureSharpness: 6
+    - _TextureTiling: 2.55
+    - _VoxelSize: 0.262
     m_Colors:
     - _VolumeOrigin: {r: 0, g: 0, b: 0, a: 0}
     - _VolumeSize: {r: 15, g: 9, b: 15, a: 0}

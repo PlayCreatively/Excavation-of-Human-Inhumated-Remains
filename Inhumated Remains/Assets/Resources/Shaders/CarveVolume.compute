@@ -26,21 +26,14 @@ void CSCarve (uint3 id : SV_DispatchThreadID)
     // Calculate distance from brush center
     float distanceToBrush = length(voxelWorldPos - BrushPosition);
     
-    // Calculate brush SDF (sphere)
-    // Negative = inside brush (should be removed/air)
-    // Positive = outside brush (untouched)
+    // Brush SDF: negative inside brush, positive outside
     float brushSDF = distanceToBrush - BrushRadius;
     
     // Read existing SDF value
     float oldSDF = CarveVolume[voxelIndex];
     
-    // Apply digging with speed modifier
-    // We "carve" by making the SDF more negative over time
-    float carveAmount = DigSpeed * DeltaTime;
-    float newBrushSDF = brushSDF - carveAmount;
-    
-    // Combine: union of void spaces (minimum of SDFs)
-    float newSDF = min(oldSDF, newBrushSDF);
+    // CSG subtraction: union of void spaces (minimum of SDFs)
+    float newSDF = min(oldSDF, brushSDF);
     
     // Write back
     CarveVolume[voxelIndex] = newSDF;

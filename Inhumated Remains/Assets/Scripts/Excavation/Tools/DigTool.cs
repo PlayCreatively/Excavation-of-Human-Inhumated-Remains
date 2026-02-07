@@ -59,10 +59,7 @@ namespace Excavation.Tools
             HandleInput();
 
             if (isDigging)
-            {
-                Debug.Log("[DigTool] Digging...");
                 PerformDig();
-            }
         }
 
         /// <summary>
@@ -197,6 +194,17 @@ namespace Excavation.Tools
             // Draw brush sphere at tool tip
             Gizmos.color = gizmoColor;
             Gizmos.DrawWireSphere(toolTip.position, currentBrush.radius);
+
+            // Detect surface at tool tip
+            Vector3 tipPosition = toolTip.position;
+            Core.SurfaceHit hit = stratigraphy.SphereTrace(
+                tipPosition - Vector3.up * 0.5f, // Start slightly above
+                Vector3.up * 2f,                 // Search down then up
+                1f,
+                excavationManager
+            );
+
+            lastHit = hit;
 
             // Draw detected surface hit
             if (lastHit.isHit)

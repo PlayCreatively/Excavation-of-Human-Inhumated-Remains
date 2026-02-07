@@ -28,6 +28,9 @@ Shader "Excavation/ExcavationRaymarch"
         _AmbientIntensity("Ambient Intensity", Range(0, 1)) = 0.15
         _DiffuseIntensity("Diffuse Intensity", Range(0, 2)) = 1.0
 
+        // Normals
+        _NormalEpsilon("Normal Epsilon", Range(0.001, 1)) = 0.05
+
         // Self-shadowing
         [Toggle] _EnableSelfShadows("Enable Self Shadows", Float) = 0
         _ShadowSteps("Shadow Steps", Int) = 32
@@ -126,6 +129,9 @@ Shader "Excavation/ExcavationRaymarch"
             Texture2D _LayerAlbedo6; Texture2D _LayerNormal6;
             Texture2D _LayerAlbedo7; Texture2D _LayerNormal7;
             
+            // Normal calculation
+            float _NormalEpsilon;
+
             // Shadow parameters
             float _EnableSelfShadows;
             int _ShadowSteps;
@@ -450,7 +456,8 @@ Shader "Excavation/ExcavationRaymarch"
                 float3 hitPointAbsolute = hitPoint + _WorldSpaceCameraPos;
 
                 // Calculate normal via finite differences on the SDF
-                float3 eps = float3(0.001, 0.0, 0.0);
+                // Epsilon should be ~1-2x voxel size to straddle voxel boundaries and smooth normals
+                float3 eps = float3(_NormalEpsilon, 0.0, 0.0);
                 float3 normal = normalize(float3(
                     EvaluateSceneSDF(hitPoint + eps.xyy, 0) - EvaluateSceneSDF(hitPoint - eps.xyy, 0),
                     EvaluateSceneSDF(hitPoint + eps.yxy, 0) - EvaluateSceneSDF(hitPoint - eps.yxy, 0),
