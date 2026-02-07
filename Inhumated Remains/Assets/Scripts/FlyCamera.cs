@@ -25,11 +25,11 @@ public class FlyCamera : MonoBehaviour
 		var currentSpeed = fastMode ? movementSpeed * fastMovementMul : movementSpeed;
 
 		// Rotation
-		if (Input.GetMouseButtonDown(1))
+		if (Input.GetMouseButtonDown(0))
 		{
 			StartLooking();
 		}
-		else if (Input.GetMouseButtonUp(1))
+		else if (Input.GetKeyDown(KeyCode.Escape))
 		{
 			StopLooking();
 		}

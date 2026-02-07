@@ -357,8 +357,15 @@ Shader "Excavation/ExcavationRaymarch"
 
                     float voxelSize = GetVoxelSize(_VoxelSize, mip);
 
-                    // Hierarchical refinement: if we're close to a surface at this mip, drop mip
-                    if (d < voxelSize * 1.5 && mip > 0)
+                    // Hierarchical refinement: refine to finer mip when close to surface.
+                    // Threshold = 2*sqrt(3) ≈ 3.465: minimum safe value for CSG negation.
+                    //
+                    // Why: conservative mips store min(children) - correction, giving a lower
+                    // bound on carveSDF. After CSG negation (sceneSDF = max(base, -carveSDF)),
+                    // this lower bound becomes an UPPER bound — overestimating safe step distance
+                    // by up to 2*sqrt(3)*voxelSize_m. We must refine before that error can
+                    // cause the ray to overshoot the true surface.
+                    if (d < voxelSize * 3.465 && mip > 0)
                     {
                         mip--;
                         continue;
@@ -372,9 +379,10 @@ Shader "Excavation/ExcavationRaymarch"
                         return true;
                     }
 
-                    // Step forward
-                    float nudge = (mip > 0) ? (voxelSize * 0.25) : 0.0;
-                    t += d + nudge;
+                    // Step forward — no nudge needed.
+                    // The CSG negation already causes overestimation at coarse mips;
+                    // any nudge would only increase overshoot risk.
+                    t += d;
                 }
 
                 hitPoint = origin + dir * t;
