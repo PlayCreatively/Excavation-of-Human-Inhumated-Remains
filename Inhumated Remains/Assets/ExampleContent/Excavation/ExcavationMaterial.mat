@@ -36,7 +36,7 @@ Material:
     - _EnableSelfShadows: 0
     - _LayerCount: 2
     - _MaxDistance: 21.3
-    - _MaxMipLevel: 5
+    - _MaxMipLevel: 3
     - _MaxSteps: 95
     - _NormalEpsilon: 0.137
     - _ShadowDistance: 5
@@ -46,9 +46,9 @@ Material:
     - _TextureScale: 1
     - _TextureSharpness: 6
     - _TextureTiling: 2.55
-    - _VoxelSize: 0.262
+    - _VoxelSize: 0.26
     m_Colors:
     - _VolumeOrigin: {r: 0, g: 0, b: 0, a: 0}
-    - _VolumeSize: {r: 15, g: 9, b: 15, a: 0}
+    - _VolumeSize: {r: 12, g: 3, b: 6, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

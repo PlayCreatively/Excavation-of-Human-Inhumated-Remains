@@ -13,8 +13,8 @@ MonoBehaviour:
   m_Name: TestVolumeSettings
   m_EditorClassIdentifier: Excavation::Excavation.Core.ExcavationVolumeSettings
   worldOrigin: {x: 0, y: 0, z: 0}
-  worldSize: {x: 15, y: 9, z: 15}
-  voxelSize: 0.262
+  worldSize: {x: 12, y: 3, z: 6}
+  voxelSize: 0.26
   maxRaymarchSteps: 95
   maxRaymarchDistance: 21.3
   surfaceThreshold: 0.0032
