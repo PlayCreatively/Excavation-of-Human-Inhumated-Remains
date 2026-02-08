@@ -1,7 +1,9 @@
-// Carve the volume using a spherical brush
+// Carve the volume using a spherical brush.
+// Volume stores scene SDF: negative = solid, positive = air.
+// Carving = CSG subtraction: max(existing, -brushSDF)
 #pragma kernel CSCarve
 
-RWTexture3D<float> CarveVolume;
+RWTexture3D<float> Volume;
 
 float3 BrushPosition;
 float BrushRadius;
@@ -13,28 +15,20 @@ float3 VolumeSize;
 int3 MinVoxel;
 
 [numthreads(8,8,8)]
-void CSCarve (uint3 id : SV_DispatchThreadID)
+void CSCarve(uint3 id : SV_DispatchThreadID)
 {
-    // Calculate actual voxel index (offset by MinVoxel for optimization)
     uint3 voxelIndex = MinVoxel + id;
-    
-    // Calculate world position of this voxel's center
-    // VolumeOrigin is the CENTER of the volume, so we offset to get the corner first
+
+    // World position of voxel center
     float3 volumeMin = VolumeOrigin - 0.5 * VolumeSize;
     float3 voxelWorldPos = volumeMin + (voxelIndex + 0.5) * VoxelSize;
-    
-    // Calculate distance from brush center
-    float distanceToBrush = length(voxelWorldPos - BrushPosition);
-    
+
     // Brush SDF: negative inside brush, positive outside
-    float brushSDF = distanceToBrush - BrushRadius;
-    
-    // Read existing SDF value
-    float oldSDF = CarveVolume[voxelIndex];
-    
-    // CSG subtraction: union of void spaces (minimum of SDFs)
-    float newSDF = min(oldSDF, brushSDF);
-    
-    // Write back
-    CarveVolume[voxelIndex] = newSDF;
+    float brushSDF = length(voxelWorldPos - BrushPosition) - BrushRadius;
+
+    // CSG subtraction: remove solid where brush is
+    // -brushSDF is positive inside brush (the region to become air)
+    // max(existing, -brushSDF) makes the carved region positive (air)
+    float existing = Volume[voxelIndex];
+    Volume[voxelIndex] = max(existing, -brushSDF);
 }

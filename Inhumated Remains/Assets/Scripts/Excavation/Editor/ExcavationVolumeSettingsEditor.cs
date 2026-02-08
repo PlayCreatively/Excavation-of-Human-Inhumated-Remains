@@ -31,7 +31,6 @@ namespace Excavation.Editor
             }
 
             DrawPropertiesExcluding(serializedObject, "m_Script");
-            DrawDefaultInspector();
             serializedObject.ApplyModifiedProperties();
         }
     }

@@ -4,7 +4,7 @@
 #pragma kernel CSQuerySDF
 #pragma kernel CSQueryMaterial
 
-#include "Shaders/SDFGeometry.hlsl"
+#include "../../Shaders/SDFGeometry.hlsl"
 
 // ============================================================================
 // BUFFERS
@@ -32,7 +32,6 @@ SamplerState sampler_CarveVolume;
 float3 VolumeOrigin;
 float3 VolumeSize;
 float VoxelSize;
-float BaseTerrainY;
 
 // ============================================================================
 // LAYER DATA (matches shader format)
@@ -55,38 +54,18 @@ float3 WorldToUVW(float3 worldPos)
     return local / VolumeSize;
 }
 
-float SampleCarveVolume(float3 worldPos)
+// Sample the scene SDF directly from the volume texture.
+// The volume stores the full scene SDF: negative = solid, positive = air.
+// Layers are baked in at init, carving modifies at runtime.
+float EvaluateSceneSDF(float3 worldPos)
 {
     float3 uvw = WorldToUVW(worldPos);
     
-    // If outside volume bounds, return large positive (no excavation)
+    // Outside volume = air
     if (any(uvw < 0.0) || any(uvw > 1.0))
-    {
         return 9999.0;
-    }
     
     return CarveVolume.SampleLevel(sampler_CarveVolume, uvw, 0).r;
-}
-
-float EvaluateBaseTerrain(float3 worldPos)
-{
-    // Start with flat ground at BaseTerrainY
-    float baseSDF = worldPos.y - BaseTerrainY;
-    
-    // Apply layer modifications (Union/Subtract operations)
-    // Note: Currently we only apply Inside operation check, not terrain modification
-    // Full terrain modification would require iterating layers with Union/Subtract ops
-    
-    return baseSDF;
-}
-
-float EvaluateSceneSDF(float3 worldPos)
-{
-    float baseSDF = EvaluateBaseTerrain(worldPos);
-    float carveSDF = SampleCarveVolume(worldPos);
-    
-    // Boolean subtraction: max(base, -carve)
-    return max(baseSDF, -carveSDF);
 }
 
 // ============================================================================

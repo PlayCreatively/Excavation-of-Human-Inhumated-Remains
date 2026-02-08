@@ -14,13 +14,11 @@ Shader "Excavation/ExcavationRaymarch"
         _MaxDistance("Max Distance", Float) = 50.0
         _SurfaceThreshold("Surface Threshold", Float) = 0.001
         
-        // Rendering
-        _BaseTerrainY("Base Terrain Y", Float) = 0.0
-        
-        // Stratigraphy (up to 8 layers)
+        // Stratigraphy
         _LayerCount("Layer Count", Int) = 0
+        _FillCount("Fill Count", Int) = 0
         
-        // Texture Settings (renamed from TextureScale for clarity - higher = smaller tiles)
+        // Texture Settings
         _TextureTiling("Texture Tiling", Float) = 1.0
         _TextureSharpness("Texture Sharpness", Float) = 8.0
 
@@ -54,7 +52,7 @@ Shader "Excavation/ExcavationRaymarch"
             
             ZWrite On
             ZTest LEqual
-            Cull Front  // Render back faces for proper ray entry from inside volume
+            Cull Front
             
             HLSLPROGRAM
             #pragma vertex vert
@@ -65,9 +63,8 @@ Shader "Excavation/ExcavationRaymarch"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
             #include "SDFCommon.hlsl"
             
-            // Volume textures
+            // Volume texture
             Texture3D<float> _CarveVolume;
-            SamplerState sampler_CarveVolume;
             
             SamplerState sampler_point_clamp
             {
@@ -85,7 +82,6 @@ Shader "Excavation/ExcavationRaymarch"
                 AddressW = Clamp;
             };
             
-            // Texture Sampler
             SamplerState sampler_linear_repeat
             {
                 Filter = MIN_MAG_MIP_LINEAR;
@@ -102,8 +98,8 @@ Shader "Excavation/ExcavationRaymarch"
             int _MaxSteps;
             float _MaxDistance;
             float _SurfaceThreshold;
-            float _BaseTerrainY;
             int _LayerCount;
+            int _FillCount;
             
             // Texture Settings
             float _TextureTiling;
@@ -113,13 +109,13 @@ Shader "Excavation/ExcavationRaymarch"
             float _AmbientIntensity;
             float _DiffuseIntensity;
 
-            // Layer data (extended for all geometry types)
+            // Layer data (packed in evaluation order: fills first, then bands)
             float4 _LayerColors[8];
-            float4 _LayerParams[8];   // Primary geometry parameters
-            float4 _LayerParams2[8];  // Secondary geometry parameters
-            int _GeometryTypes[8];    // Geometry type IDs
+            float4 _LayerParams[8];
+            float4 _LayerParams2[8];
+            int _GeometryTypes[8];
             
-            // Textures (up to 8 layers)
+            // Layer textures
             Texture2D _LayerAlbedo0; Texture2D _LayerNormal0;
             Texture2D _LayerAlbedo1; Texture2D _LayerNormal1;
             Texture2D _LayerAlbedo2; Texture2D _LayerNormal2;
@@ -138,7 +134,7 @@ Shader "Excavation/ExcavationRaymarch"
             float _ShadowDistance;
             float _ShadowSoftness;
             
-            // Light direction (passed from script)
+            // Light direction
             float3 _MainLightDirection;
             float4 _MainLightColor;
             
@@ -152,198 +148,56 @@ Shader "Excavation/ExcavationRaymarch"
             {
                 float4 positionCS : SV_POSITION;
                 float3 positionWS : TEXCOORD0;
-                float3 rayOrigin : TEXCOORD1;
-                float3 rayDir : TEXCOORD2;
             };
 
-            // Convert SV_POSITION (pixel coords) -> normalized screen UV (0..1)
-            float2 GetNormalizedScreenUV(float4 positionCS)
+            // ================================================================
+            // Scene SDF — pure texture sample
+            // Volume stores scene SDF directly: negative = solid, positive = air.
+            // No analytical base terrain, no CSG negation.
+            // ================================================================
+
+            float EvaluateSceneSDF(float3 cameraRelativePos, int mipLevel)
             {
-                // In fragment stage, SV_POSITION.xy is in pixel coordinates in Unity.
-                // _ScreenSize.zw = (1/width, 1/height)
-                return positionCS.xy * _ScreenSize.zw;
-            }
-
-            // Unproject a point from NDC into world space using inverse view-projection.
-            // ndc.xy in [-1,1]. ndc.z in [0,1] (Unity/D3D style in modern pipelines).
-            float3 UnprojectNDCToWorld(float3 ndc)
-            {
-                float4 clip = float4(ndc.xy, ndc.z, 1.0);
-                float4 worldH = mul(UNITY_MATRIX_I_VP, clip);
-                return worldH.xyz / max(worldH.w, 1e-6);
-            }
-
-            // Build a world-space view ray for this pixel.
-            // Returns: rayOrigin = camera position, rayDir = normalized direction.
-            // Uses near/far unprojection so it works whether camera is inside/outside the proxy mesh.
-            void BuildWorldSpaceViewRay(float4 positionCS, out float3 rayOrigin, out float3 rayDir)
-            {
-                float2 uv = GetNormalizedScreenUV(positionCS);
-
-                // NDC x/y in [-1,1]
-                float2 ndcXY = uv * 2.0 - 1.0;
-
-                // Unproject near and far points
-                // UNITY_MATRIX_I_VP gives CAMERA-RELATIVE world positions in HDRP
-                // (camera is at origin in this space)
-                float3 worldNear = UnprojectNDCToWorld(float3(ndcXY, 0.0));
-                float3 worldFar  = UnprojectNDCToWorld(float3(ndcXY, 1.0));
-
-                // In camera-relative rendering, camera is at origin
-                rayOrigin = float3(0, 0, 0);
-                rayDir    = normalize(worldFar - worldNear);
-            }
-
-            // Ray-box intersection for an axis-aligned bounding box.
-            // Returns true if intersects, and outputs the parametric interval [tEnter, tExit].
-            bool RayAABBIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 boxMax, out float tEnter, out float tExit)
-            {
-                // Avoid division by zero: reciprocal with big number for near-zero components
-                float3 invDir = 1.0 / (abs(rayDir) > 1e-8 ? rayDir : (sign(rayDir) * 1e-8));
-
-                float3 t0 = (boxMin - rayOrigin) * invDir;
-                float3 t1 = (boxMax - rayOrigin) * invDir;
-
-                float3 tMin = min(t0, t1);
-                float3 tMax = max(t0, t1);
-
-                tEnter = max(tMin.x, max(tMin.y, tMin.z));
-                tExit  = min(tMax.x, min(tMax.y, tMax.z));
-
-                // Intersection exists if exit is after enter
-                return (tExit >= tEnter);
-            }
-
-
-            // Evaluate base terrain SDF (flat ground for now)
-            // worldPos is camera-relative; convert to absolute Y for comparison
-            float EvaluateBaseTerrain(float3 worldPos)
-            {
-                return (worldPos.y + _WorldSpaceCameraPos.y) - _BaseTerrainY;
-            }
-            
-            // Evaluate the complete scene SDF
-            // worldPos is in camera-relative space
-            // Uses linear sampling at MIP 0 for visual smoothness, point for higher MIPs
-            float EvaluateSceneSDF(float3 worldPos, int mipLevel)
-            {
-                float baseSDF = EvaluateBaseTerrain(worldPos);
-                
-                // Convert camera-relative position to absolute world position for UVW lookup
-                // _VolumeOrigin is the CENTER of the volume
-                float3 absoluteWorldPos = worldPos + _WorldSpaceCameraPos;
+                float3 absoluteWorldPos = cameraRelativePos + _WorldSpaceCameraPos;
                 float3 volumeMin = _VolumeOrigin - 0.5 * _VolumeSize;
                 float3 uvw = WorldToUVW(absoluteWorldPos, volumeMin, _VolumeSize);
 
-                // Outside volume: just return terrain
+                // Outside volume = air
                 if (any(uvw < 0.0) || any(uvw > 1.0))
-                {
-                    return baseSDF;
-                }
+                    return 9999.0;
 
-                // Sample carve volume
-                // Initial value +9999 (uncarved), becomes negative inside carved regions
-                // USE LINEAR SAMPLING AT MIP 0 to ensure smooth normals and lighting gradients
-                float carveSDF;
                 if (mipLevel == 0)
-                {
-                     carveSDF = _CarveVolume.SampleLevel(sampler_linear_clamp, uvw, mipLevel).r;
-                }
+                    return _CarveVolume.SampleLevel(sampler_linear_clamp, uvw, 0).r;
                 else
-                {
-                     carveSDF = _CarveVolume.SampleLevel(sampler_point_clamp, uvw, mipLevel).r;
-                }
-                
-                // CSG subtraction: terrain minus carved void
-                // -carveSDF flips the void, max() performs the subtraction
-                return max(baseSDF, -carveSDF);
+                    return _CarveVolume.SampleLevel(sampler_point_clamp, uvw, mipLevel).r;
             }
-            
-            // Helper to sample correct texture based on index
-            void SampleLayerTexture(int index, float3 pos, float3 normal, out float3 albedo, out float3 normalTan)
-            {
-                float mip = 0; 
-                float scale = _TextureTiling;
-                float sharpness = _TextureSharpness;
-                
-                float3 col = float3(1,1,1);
-                float3 nrm = float3(0.5, 0.5, 1.0); // Default normal (unpacked neutral)
 
-                // Sample albedo - manual unroll for texture array workaround
-                if (index == 0) { col = TriplanarSampleLevel(_LayerAlbedo0, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal0, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
-                else if (index == 1) { col = TriplanarSampleLevel(_LayerAlbedo1, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal1, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
-                else if (index == 2) { col = TriplanarSampleLevel(_LayerAlbedo2, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal2, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
-                else if (index == 3) { col = TriplanarSampleLevel(_LayerAlbedo3, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal3, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
-                else if (index == 4) { col = TriplanarSampleLevel(_LayerAlbedo4, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal4, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
-                else if (index == 5) { col = TriplanarSampleLevel(_LayerAlbedo5, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal5, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
-                else if (index == 6) { col = TriplanarSampleLevel(_LayerAlbedo6, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal6, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
-                else if (index == 7) { col = TriplanarSampleLevel(_LayerAlbedo7, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal7, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
-                
-                albedo = col;
-                // Unpack normal from 0-1 to -1 to 1 range
-                normalTan = nrm * 2.0 - 1.0;
-            }
-            
-            // Perturb world normal using tangent-space normal map
-            float3 PerturbNormal(float3 worldNormal, float3 worldPos, float3 tangentNormal)
-            {
-                // Build TBN matrix from world normal
-                // For procedural geometry, we derive tangent/bitangent from world axes
-                float3 N = normalize(worldNormal);
-                
-                // Choose a reference vector that's not parallel to N
-                float3 ref = abs(N.y) < 0.999 ? float3(0, 1, 0) : float3(1, 0, 0);
-                float3 T = normalize(cross(ref, N));
-                float3 B = cross(N, T);
-                
-                // Transform tangent normal to world space
-                float3x3 TBN = float3x3(T, B, N);
-                return normalize(mul(tangentNormal, TBN));
-            }
-            
-            // Get material layer at world position
-            void GetMaterialData(float3 worldPos, float3 normal, out float3 color, out float3 finalNormal)
-            {
-                int layerIndex = -1;
+            // ================================================================
+            // Ray-box intersection
+            // ================================================================
 
-                for (int i = 0; i < _LayerCount; i++)
-                {
-                    // Use shared EvaluateLayerSDF with geometry type dispatch
-                    int geomType = _GeometryTypes[i];
-                    float4 params1 = _LayerParams[i];
-                    float4 params2 = _LayerParams2[i];
-                    
-                    float sdf = EvaluateLayerSDF(worldPos, geomType, params1, params2);
-                    
-                    if (sdf < 0.0)
-                    {
-                        layerIndex = i;
-                        break;
-                    }
-                }
-                
-                if (layerIndex >= 0)
-                {
-                    float3 texColor;
-                    float3 texNormal;
-                    SampleLayerTexture(layerIndex, worldPos, normal, texColor, texNormal);
-                    
-                    color = _LayerColors[layerIndex].rgb * texColor;
-                    // Apply normal map perturbation
-                    finalNormal = PerturbNormal(normal, worldPos, texNormal);
-                }
-                else
-                {
-                    // fallback
-                    color = float3(1, 0.0, 1); // Magenta for debugging
-                    finalNormal = normal;
-                }
+            bool RayAABBIntersect(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 boxMax,
+                                  out float tEnter, out float tExit)
+            {
+                float3 invDir = 1.0 / (abs(rayDir) > 1e-8 ? rayDir : (sign(rayDir) * 1e-8));
+                float3 t0 = (boxMin - rayOrigin) * invDir;
+                float3 t1 = (boxMax - rayOrigin) * invDir;
+                float3 tMin = min(t0, t1);
+                float3 tMax = max(t0, t1);
+                tEnter = max(tMin.x, max(tMin.y, tMin.z));
+                tExit  = min(tMax.x, min(tMax.y, tMax.z));
+                return (tExit >= tEnter);
             }
-            
+
+            // ================================================================
+            // Hierarchical raymarching
+            // Conservative mips are now directly valid for the scene SDF.
+            // No CSG inversion — standard safety threshold of 1.5x voxel size.
+            // ================================================================
+
             bool RaymarchSegment(float3 origin, float3 dir, float tStart, float tEnd,
-                     out float3 hitPoint, out float totalDist)
+                                 out float3 hitPoint, out float totalDist)
             {
-                // Clamp start to non-negative so we don't march behind camera
                 float t = max(tStart, 0.0);
                 int mip = _MaxMipLevel;
 
@@ -357,21 +211,14 @@ Shader "Excavation/ExcavationRaymarch"
 
                     float voxelSize = GetVoxelSize(_VoxelSize, mip);
 
-                    // Hierarchical refinement: refine to finer mip when close to surface.
-                    // Threshold = 2*sqrt(3) ≈ 3.465: minimum safe value for CSG negation.
-                    //
-                    // Why: conservative mips store min(children) - correction, giving a lower
-                    // bound on carveSDF. After CSG negation (sceneSDF = max(base, -carveSDF)),
-                    // this lower bound becomes an UPPER bound — overestimating safe step distance
-                    // by up to 2*sqrt(3)*voxelSize_m. We must refine before that error can
-                    // cause the ray to overshoot the true surface.
-                    if (d < voxelSize * 3.465 && mip > 0)
+                    // Refine to finer mip when distance is within safety margin
+                    if (d < voxelSize * 1.5 && mip > 0)
                     {
                         mip--;
                         continue;
                     }
 
-                    // Hit condition
+                    // Hit
                     if (d < _SurfaceThreshold)
                     {
                         hitPoint = p;
@@ -379,9 +226,6 @@ Shader "Excavation/ExcavationRaymarch"
                         return true;
                     }
 
-                    // Step forward — no nudge needed.
-                    // The CSG negation already causes overestimation at coarse mips;
-                    // any nudge would only increase overshoot risk.
                     t += d;
                 }
 
@@ -390,8 +234,97 @@ Shader "Excavation/ExcavationRaymarch"
                 return false;
             }
 
+            // ================================================================
+            // Material evaluation
+            // Fills: youngest→oldest (forward: 0 to _FillCount-1)
+            // Bands: oldest→youngest (reverse: _LayerCount-1 down to _FillCount)
+            // Both stored youngest-first; bands iterated backward so oldest wins.
+            // ================================================================
+
+            void SampleLayerTexture(int index, float3 pos, float3 normal,
+                                    out float3 albedo, out float3 normalTan)
+            {
+                float scale = _TextureTiling;
+                float sharpness = _TextureSharpness;
+                float mip = 0;
+                
+                float3 col = float3(1,1,1);
+                float3 nrm = float3(0.5, 0.5, 1.0);
+
+                if      (index == 0) { col = TriplanarSampleLevel(_LayerAlbedo0, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal0, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
+                else if (index == 1) { col = TriplanarSampleLevel(_LayerAlbedo1, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal1, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
+                else if (index == 2) { col = TriplanarSampleLevel(_LayerAlbedo2, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal2, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
+                else if (index == 3) { col = TriplanarSampleLevel(_LayerAlbedo3, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal3, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
+                else if (index == 4) { col = TriplanarSampleLevel(_LayerAlbedo4, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal4, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
+                else if (index == 5) { col = TriplanarSampleLevel(_LayerAlbedo5, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal5, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
+                else if (index == 6) { col = TriplanarSampleLevel(_LayerAlbedo6, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal6, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
+                else if (index == 7) { col = TriplanarSampleLevel(_LayerAlbedo7, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; nrm = TriplanarSampleLevel(_LayerNormal7, sampler_linear_repeat, pos, normal, scale, sharpness, mip).rgb; }
+                
+                albedo = col;
+                normalTan = nrm * 2.0 - 1.0;
+            }
             
-            // Compute soft shadows
+            float3 PerturbNormal(float3 worldNormal, float3 tangentNormal)
+            {
+                float3 N = normalize(worldNormal);
+                float3 ref_vec = abs(N.y) < 0.999 ? float3(0, 1, 0) : float3(1, 0, 0);
+                float3 T = normalize(cross(ref_vec, N));
+                float3 B = cross(N, T);
+                float3x3 TBN = float3x3(T, B, N);
+                return normalize(mul(tangentNormal, TBN));
+            }
+
+            void GetMaterialData(float3 worldPos, float3 normal, out float3 color, out float3 finalNormal)
+            {
+                int layerIndex = -1;
+
+                // 1. Check fills: youngest→oldest (indices 0 to _FillCount-1)
+                for (int i = 0; i < _FillCount; i++)
+                {
+                    float sdf = EvaluateLayerSDF(worldPos, _GeometryTypes[i], _LayerParams[i], _LayerParams2[i]);
+                    if (sdf < 0.0)
+                    {
+                        layerIndex = i;
+                        break;
+                    }
+                }
+
+                // 2. If no fill found, check bands: oldest→youngest (reverse)
+                //    Bands are packed youngest-first at indices _FillCount.._LayerCount-1,
+                //    so iterate backward to check oldest first.
+                if (layerIndex < 0)
+                {
+                    for (int i = _LayerCount - 1; i >= _FillCount; i--)
+                    {
+                        float sdf = EvaluateLayerSDF(worldPos, _GeometryTypes[i], _LayerParams[i], _LayerParams2[i]);
+                        if (sdf < 0.0)
+                        {
+                            layerIndex = i;
+                            break;
+                        }
+                    }
+                }
+                
+                if (layerIndex >= 0)
+                {
+                    float3 texColor;
+                    float3 texNormal;
+                    SampleLayerTexture(layerIndex, worldPos, normal, texColor, texNormal);
+                    
+                    color = _LayerColors[layerIndex].rgb * texColor;
+                    finalNormal = PerturbNormal(normal, texNormal);
+                }
+                else
+                {
+                    color = float3(1, 0, 1); // Magenta fallback
+                    finalNormal = normal;
+                }
+            }
+
+            // ================================================================
+            // Soft shadows
+            // ================================================================
+
             float ComputeSoftShadow(float3 hitPoint, float3 normal, float3 lightDir)
             {
                 if (_EnableSelfShadows < 0.5) return 1.0;
@@ -415,17 +348,17 @@ Shader "Excavation/ExcavationRaymarch"
                 
                 return saturate(shadow);
             }
+
+            // ================================================================
+            // Vertex / Fragment
+            // ================================================================
             
             Varyings vert(Attributes input)
             {
                 Varyings output;
-                // TransformObjectToWorld returns CAMERA-RELATIVE position in HDRP
-                // (camera is at origin in this coordinate space)
                 float3 posWS = TransformObjectToWorld(input.positionOS.xyz);
                 output.positionCS = TransformWorldToHClip(posWS);
                 output.positionWS = posWS;
-                output.rayOrigin = float3(0,0,0);
-                output.rayDir = float3(0,0,0);
                 return output;
             }
             
@@ -439,8 +372,7 @@ Shader "Excavation/ExcavationRaymarch"
             {
                 FragOutput output;
 
-                // In HDRP camera-relative rendering, camera is at (0,0,0)
-                float3 rayOrigin = float3(0, 0, 0);
+                float3 rayOrigin = float3(0, 0, 0); // Camera-relative
                 float3 rayDir = normalize(input.positionWS);
 
                 // Volume AABB in camera-relative space
@@ -453,18 +385,16 @@ Shader "Excavation/ExcavationRaymarch"
 
                 tEnter = max(tEnter, 0.0) + 1e-4;
 
-                // Raymarch the terrain + carve volume SDF
                 float3 hitPoint;
                 float totalDist;
                 bool hit = RaymarchSegment(rayOrigin, rayDir, tEnter, tExit, hitPoint, totalDist);
 
                 if (!hit) discard;
 
-                // Convert hit point to absolute world space for material lookups
+                // Absolute world position for material lookups
                 float3 hitPointAbsolute = hitPoint + _WorldSpaceCameraPos;
 
-                // Calculate normal via finite differences on the SDF
-                // Epsilon should be ~1-2x voxel size to straddle voxel boundaries and smooth normals
+                // Normal via central differences on the scene SDF
                 float3 eps = float3(_NormalEpsilon, 0.0, 0.0);
                 float3 normal = normalize(float3(
                     EvaluateSceneSDF(hitPoint + eps.xyy, 0) - EvaluateSceneSDF(hitPoint - eps.xyy, 0),
@@ -472,33 +402,29 @@ Shader "Excavation/ExcavationRaymarch"
                     EvaluateSceneSDF(hitPoint + eps.yyx, 0) - EvaluateSceneSDF(hitPoint - eps.yyx, 0)
                 ));
 
-                // Get material data (uses absolute world position for layer SDFs and texturing)
+                // Material
                 float3 materialColor;
                 float3 finalNormal;
                 GetMaterialData(hitPointAbsolute, normal, materialColor, finalNormal);
 
-                // Lighting: use main light direction or fallback
+                // Lighting
                 float3 lightDir = normalize(_MainLightDirection.xyz);
                 if (length(_MainLightDirection) < 0.01)
                     lightDir = normalize(float3(1, 1, 1));
                 
                 float ndotl = max(0.0, dot(finalNormal, lightDir));
-
-                // Compute shadows if enabled
                 float shadow = ComputeSoftShadow(hitPoint, finalNormal, lightDir);
 
-                // Final color with ambient and diffuse lighting
                 float3 ambient = materialColor * _AmbientIntensity * _DiffuseIntensity;
-                float3 diffuse = materialColor * ndotl /* * shadow*/ * _MainLightColor.rgb * _DiffuseIntensity;
+                float3 diffuse = materialColor * ndotl * shadow * _MainLightColor.rgb * _DiffuseIntensity;
                 output.color = float4(ambient + diffuse, 1.0);
 
-                // hitPoint is camera-relative, TransformWorldToHClip expects this in HDRP
+                // Depth
                 float4 clipPos = TransformWorldToHClip(hitPoint);
                 output.depth = clipPos.z / clipPos.w;
 
                 return output;
             }
-
             
             ENDHLSL
         }

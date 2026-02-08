@@ -148,9 +148,7 @@ namespace Excavation.Editor
                 topsoil.hardness = 4f;
                 topsoil.geometryData = new Stratigraphy.DepthBandGeometry
                 {
-                    topY = 0f,
-                    bottomY = -0.3f,
-                    operation = Stratigraphy.LayerOperation.Inside
+                    depth = 0.8f,
                 };
                 AssetDatabase.CreateAsset(topsoil, assetPath + "Topsoil.asset");
 
@@ -160,9 +158,7 @@ namespace Excavation.Editor
                 subsoil.hardness = 7f;
                 subsoil.geometryData = new Stratigraphy.DepthBandGeometry
                 {
-                    topY = -0.3f,
-                    bottomY = -1.5f,
-                    operation = Stratigraphy.LayerOperation.Inside
+                    depth = 0.8f,
                 };
                 AssetDatabase.CreateAsset(subsoil, assetPath + "Subsoil.asset");
 

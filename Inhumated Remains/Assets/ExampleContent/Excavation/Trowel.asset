@@ -12,6 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f3e9b779a83af064fa0d260fbb73cc63, type: 3}
   m_Name: Trowel
   m_EditorClassIdentifier: Excavation::Excavation.Tools.DigBrushPreset
-  radius: 0.4
+  radius: 0.3
   digSpeed: 3.4
   scrapeSounds: []

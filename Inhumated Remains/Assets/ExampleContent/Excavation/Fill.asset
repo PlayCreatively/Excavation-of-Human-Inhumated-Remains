@@ -10,21 +10,20 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8579e4870b018db4a9a697ee2e8a88af, type: 3}
-  m_Name: Topsoil
+  m_Name: Fill
   m_EditorClassIdentifier: Excavation::Excavation.Stratigraphy.MaterialLayer
-  layerName: Topsoil
-  baseColour: {r: 0.27496368, g: 0.735849, b: 0.18187965, a: 1}
+  layerName: Fill
+  baseColour: {r: 0.5, g: 0.5, b: 0.5, a: 1}
   albedoTexture: {fileID: 0}
   normalMap: {fileID: 0}
-  hardness: 5.54
+  hardness: 5
   geometryData:
-    rid: 3354859675492024390
+    rid: 3354859759991259241
   references:
     version: 2
     RefIds:
-    - rid: 3354859675492024390
-      type: {class: DepthBandGeometry, ns: Excavation.Stratigraphy, asm: Excavation}
+    - rid: 3354859759991259241
+      type: {class: EllipsoidGeometry, ns: Excavation.Stratigraphy, asm: Excavation}
       data:
-        depth: 0.1
-        computedTopY: 0
-        computedBottomY: -0.1
+        centre: {x: 0, y: -0.52, z: 0}
+        radii: {x: 1, y: 0.67, z: 1}

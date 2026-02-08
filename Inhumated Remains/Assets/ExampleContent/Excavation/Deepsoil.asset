@@ -10,21 +10,21 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8579e4870b018db4a9a697ee2e8a88af, type: 3}
-  m_Name: Topsoil
+  m_Name: Deepsoil
   m_EditorClassIdentifier: Excavation::Excavation.Stratigraphy.MaterialLayer
-  layerName: Topsoil
-  baseColour: {r: 0.27496368, g: 0.735849, b: 0.18187965, a: 1}
-  albedoTexture: {fileID: 0}
+  layerName: Subsoil
+  baseColour: {r: 1, g: 1, b: 1, a: 1}
+  albedoTexture: {fileID: 2800000, guid: 5d5ada3fcee6ca14ea9e1e8264f7f920, type: 3}
   normalMap: {fileID: 0}
-  hardness: 5.54
+  hardness: 6.48
   geometryData:
-    rid: 3354859675492024390
+    rid: 3354859675492024391
   references:
     version: 2
     RefIds:
-    - rid: 3354859675492024390
+    - rid: 3354859675492024391
       type: {class: DepthBandGeometry, ns: Excavation.Stratigraphy, asm: Excavation}
       data:
-        depth: 0.1
-        computedTopY: 0
-        computedBottomY: -0.1
+        depth: 2
+        computedTopY: -0.4
+        computedBottomY: -5.4

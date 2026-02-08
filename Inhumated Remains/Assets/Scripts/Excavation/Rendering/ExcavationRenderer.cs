@@ -39,42 +39,28 @@ namespace Excavation.Rendering
             meshFilter = GetComponent<MeshFilter>();
             meshRenderer = GetComponent<MeshRenderer>();
 
-            // Set material
             if (raymarchMaterial != null)
-            {
                 meshRenderer.material = raymarchMaterial;
-            }
 
-            // Generate bounding box proxy mesh
             GenerateProxyMesh();
         }
 
-        /// <summary>
-        /// Generate a cube mesh that encompasses the excavation volume.
-        /// This is what we render with the raymarching shader.
-        /// </summary>
         private void GenerateProxyMesh()
         {
             var settings = excavationManager.Settings;
 
-            // Position the renderer at the volume's center
             transform.position = settings.worldOrigin + settings.worldSize * 0.5f;
 
-            // Create a cube mesh with the volume's dimensions
             Mesh mesh = new Mesh();
             mesh.name = "Excavation Proxy";
 
-            // Simple cube vertices (local space, centered at origin)
             Vector3 halfSize = settings.worldSize * 0.5f;
             Vector3[] vertices = new Vector3[]
             {
-                // Front face
                 new Vector3(-halfSize.x, -halfSize.y, -halfSize.z),
                 new Vector3( halfSize.x, -halfSize.y, -halfSize.z),
                 new Vector3( halfSize.x,  halfSize.y, -halfSize.z),
                 new Vector3(-halfSize.x,  halfSize.y, -halfSize.z),
-                
-                // Back face
                 new Vector3(-halfSize.x, -halfSize.y,  halfSize.z),
                 new Vector3( halfSize.x, -halfSize.y,  halfSize.z),
                 new Vector3( halfSize.x,  halfSize.y,  halfSize.z),
@@ -83,17 +69,11 @@ namespace Excavation.Rendering
 
             int[] triangles = new int[]
             {
-                // Front
                 0, 2, 1, 0, 3, 2,
-                // Back
                 5, 6, 4, 4, 6, 7,
-                // Left
                 4, 7, 0, 0, 7, 3,
-                // Right
                 1, 2, 5, 5, 2, 6,
-                // Top
                 3, 6, 2, 3, 7, 6,
-                // Bottom
                 4, 0, 1, 4, 1, 5
             };
 
@@ -113,9 +93,6 @@ namespace Excavation.Rendering
             UpdateMaterialProperties();
         }
 
-        /// <summary>
-        /// Update material properties for the raymarching shader.
-        /// </summary>
         private void UpdateMaterialProperties()
         {
             Material mat = meshRenderer.material;
@@ -131,46 +108,24 @@ namespace Excavation.Rendering
             mat.SetInt("_MaxSteps", settings.maxRaymarchSteps);
             mat.SetFloat("_MaxDistance", settings.maxRaymarchDistance);
             mat.SetFloat("_SurfaceThreshold", settings.surfaceThreshold);
+            mat.SetInt("_MaxMipLevel", settings.GetMaxMipLevel());
 
-            // Camera position for raymarching
-            if (Camera.main != null)
-            {
-                mat.SetVector("_CameraPosition", Camera.main.transform.position);
-            }
-
-            // Layer data (simplified - just pass count and first few layers)
+            // Layer data (packed in evaluation order: fills first, then bands)
             if (stratigraphy != null && stratigraphy.Layers != null)
             {
-                int layerCount = Mathf.Min(stratigraphy.Layers.Count, 8);
-                mat.SetInt("_LayerCount", layerCount); // Max 8 layers for shader
-                mat.SetInt("_MaxMipLevel", settings.GetMaxMipLevel());
+                stratigraphy.GetGPULayerData(
+                    out Color[] colors, out Vector4[] layerParams, out Vector4[] layerParams2,
+                    out float[] geometryTypes, out int fillCount, out int totalCount);
 
-                // Pass layer colors and properties
-                Color[] layerColors = new Color[8];
-                Vector4[] layerParams = new Vector4[8];  // Primary geometry parameters
-                Vector4[] layerParams2 = new Vector4[8]; // Secondary geometry parameters (noise, etc.)
-                float[] geometryTypes = new float[8];        // Geometry type IDs
-
-                for (int i = 0; i < layerCount; i++)
-                {
-                    if (stratigraphy.Layers[i] != null)
-                    {
-                        layerColors[i] = stratigraphy.Layers[i].baseColour;
-
-                        var geometry = stratigraphy.Layers[i].geometryData;
-                        if (geometry != null)
-                        {
-                            geometryTypes[i] = (int)geometry.GeometryType;
-                            layerParams[i] = geometry.GetPackedParams();
-                            layerParams2[i] = geometry.GetPackedParams2();
-                        }
-                    }
-                }
-
-                mat.SetColorArray("_LayerColors", layerColors);
+                mat.SetInt("_LayerCount", totalCount);
+                mat.SetInt("_FillCount", fillCount);
+                mat.SetColorArray("_LayerColors", colors);
                 mat.SetVectorArray("_LayerParams", layerParams);
                 mat.SetVectorArray("_LayerParams2", layerParams2);
                 mat.SetFloatArray("_GeometryTypes", geometryTypes);
+
+                // Set layer textures in evaluation order
+                stratigraphy.SetLayerTextures(mat);
             }
         }
     }

@@ -3,13 +3,12 @@ using UnityEngine;
 namespace Excavation.Stratigraphy
 {
     /// <summary>
-    /// How a layer's geometry interacts with the base terrain.
+    /// Category of layer geometry, determines material evaluation order.
     /// </summary>
-    public enum LayerOperation
+    public enum LayerCategory
     {
-        Inside,   // AND — only exists within base terrain (default for deposits)
-        Union,    // OR  — adds to base terrain (burial mounds, spoil heaps)
-        Subtract  // XOR — cuts through everything (modern service trench, pipe)
+        Band,   // Horizontal deposit (DepthBand, NoisyDepthBand) — evaluated oldest→youngest
+        Fill    // Discrete feature (Cut, Ellipsoid) — evaluated youngest→oldest
     }
 
     /// <summary>
@@ -24,39 +23,35 @@ namespace Excavation.Stratigraphy
         Ellipsoid = 3
     }
 
-    // TODO: Fill Geometry
-    // A Fill geometry could reference an existing Cut geometry and override its material.
-    // This would allow modeling pit fills, ditch fills, etc. that share the same shape
-    // as their cut but have different material properties.
-    // Implementation would need to:
-    // 1. Add FillGeometry class that references a CutGeometry
-    // 2. In layer ordering, ensure fill comes before cut (younger)
-    // 3. Fill's SDF would delegate to the referenced cut's SDF
-
     /// <summary>
     /// Abstract base class for layer geometry definitions.
     /// Uses signed distance fields (SDF) to define layer boundaries.
+    /// 
+    /// Convention: Negative = inside the layer (solid), Positive = outside.
+    /// All layers add solid geometry when baked into the volume texture.
     /// </summary>
     [System.Serializable]
     public abstract class LayerGeometryData
     {
-        [Tooltip("How this layer interacts with the base terrain")]
-        public LayerOperation operation = LayerOperation.Inside;
-
         /// <summary>
         /// Get the geometry type ID for GPU evaluation.
         /// </summary>
         public abstract LayerGeometryType GeometryType { get; }
 
         /// <summary>
+        /// Get the layer category (Band or Fill) for material evaluation ordering.
+        /// </summary>
+        public abstract LayerCategory Category { get; }
+
+        /// <summary>
         /// Pack primary parameters for GPU (float4).
-        /// Layout depends on geometry type - see SDFGeometry.hlsl for packing spec.
+        /// Layout depends on geometry type — see SDFGeometry.hlsl for packing spec.
         /// </summary>
         public abstract Vector4 GetPackedParams();
 
         /// <summary>
         /// Pack secondary parameters for GPU (float4).
-        /// Layout depends on geometry type - see SDFGeometry.hlsl for packing spec.
+        /// Layout depends on geometry type — see SDFGeometry.hlsl for packing spec.
         /// </summary>
         public abstract Vector4 GetPackedParams2();
 

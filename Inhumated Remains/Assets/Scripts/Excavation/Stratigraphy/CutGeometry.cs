@@ -4,23 +4,25 @@ namespace Excavation.Stratigraphy
 {
     /// <summary>
     /// Vertical cylindrical cut feature (pit, posthole, ditch).
-    /// Represents archaeological cut contexts.
+    /// Represents archaeological fill contexts — material deposited inside a feature.
+    /// The shape defines where the fill material exists.
     /// </summary>
     [System.Serializable]
     public class CutGeometry : LayerGeometryData
     {
-        [Tooltip("Center point of the cut (world space)")]
+        [Tooltip("Center point of the feature (world space XYZ)")]
         public Vector3 centre = Vector3.zero;
 
-        [Tooltip("Radius of the cylindrical cut")]
-        [Range(0.1f, 10f)]
+        [Tooltip("Radius of the cylindrical feature")]
+        [Min(0.01f)]
         public float radius = 1f;
 
-        [Tooltip("Depth of the cut from the centre Y coordinate")]
-        [Range(0.1f, 5f)]
+        [Tooltip("Depth of the feature from the centre Y coordinate")]
+        [Min(0.01f)]
         public float depth = 1f;
 
         public override LayerGeometryType GeometryType => LayerGeometryType.Cut;
+        public override LayerCategory Category => LayerCategory.Fill;
 
         public override Vector4 GetPackedParams()
         {
@@ -36,20 +38,16 @@ namespace Excavation.Stratigraphy
 
         public override float SDF(Vector3 worldPos)
         {
-            // Horizontal distance from center (XZ plane)
             Vector2 horizontalOffset = new Vector2(
                 worldPos.x - centre.x,
                 worldPos.z - centre.z
             );
             float horizontalDist = horizontalOffset.magnitude - radius;
 
-            // Vertical containment (between top and bottom)
-            float topDist = centre.y - worldPos.y;           // Positive when below top
-            float bottomDist = worldPos.y - (centre.y - depth); // Positive when above bottom
-
+            float topDist = centre.y - worldPos.y;
+            float bottomDist = worldPos.y - (centre.y - depth);
             float verticalDist = Mathf.Max(-topDist, -bottomDist);
 
-            // Combine: inside when both horizontal AND vertical are negative
             return Mathf.Max(horizontalDist, verticalDist);
         }
     }

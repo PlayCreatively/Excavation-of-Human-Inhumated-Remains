@@ -3,19 +3,18 @@ using UnityEditor;
 
 namespace Excavation.Editor
 {
-    /// <summary>
-    /// Custom editor for ExcavationManager with utility functions.
-    /// </summary>
     [CustomEditor(typeof(Core.ExcavationManager))]
     public class ExcavationManagerEditor : UnityEditor.Editor
     {
         private SerializedProperty settingsProp;
+        private SerializedProperty stratigraphyProp;
         private SerializedProperty carveShaderProp;
         private SerializedProperty mipGenShaderProp;
 
         void OnEnable()
         {
             settingsProp = serializedObject.FindProperty("settings");
+            stratigraphyProp = serializedObject.FindProperty("stratigraphy");
             carveShaderProp = serializedObject.FindProperty("carveShader");
             mipGenShaderProp = serializedObject.FindProperty("mipGenShader");
         }
@@ -34,7 +33,6 @@ namespace Excavation.Editor
             EditorGUILayout.LabelField("Configuration", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(settingsProp);
 
-            // Display volume info if settings assigned
             if (settingsProp.objectReferenceValue != null)
             {
                 var settings = settingsProp.objectReferenceValue as Core.ExcavationVolumeSettings;
@@ -42,17 +40,21 @@ namespace Excavation.Editor
                 {
                     var resolution = settings.GetTextureResolution();
                     int totalVoxels = resolution.x * resolution.y * resolution.z;
-                    float memorySizeMB = (totalVoxels * 2f) / (1024f * 1024f); // R16 = 2 bytes per voxel
+                    float memorySizeMB = (totalVoxels * 4f) / (1024f * 1024f); // RFloat = 4 bytes
 
                     EditorGUILayout.HelpBox(
                         $"Volume: {settings.worldSize.x}×{settings.worldSize.y}×{settings.worldSize.z}m\n" +
                         $"Resolution: {resolution.x}×{resolution.y}×{resolution.z}\n" +
-                        $"Total Voxels: {totalVoxels:N0}\n" +
-                        $"Memory (approx): {memorySizeMB:F2} MB",
-                        MessageType.Info
-                    );
+                        $"Voxels: {totalVoxels:N0} | Memory: ~{memorySizeMB:F1} MB",
+                        MessageType.Info);
                 }
             }
+
+            EditorGUILayout.Space();
+
+            // Stratigraphy
+            EditorGUILayout.LabelField("Stratigraphy", EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(stratigraphyProp);
 
             EditorGUILayout.Space();
 
@@ -63,28 +65,17 @@ namespace Excavation.Editor
 
             if (carveShaderProp.objectReferenceValue == null || mipGenShaderProp.objectReferenceValue == null)
             {
-                EditorGUILayout.HelpBox("Compute shaders not assigned! Load from Resources/Shaders/", MessageType.Warning);
-                
                 if (GUILayout.Button("Auto-Load Shaders from Resources"))
                 {
                     if (carveShaderProp.objectReferenceValue == null)
                     {
                         var carve = Resources.Load<ComputeShader>("Shaders/CarveVolume");
-                        if (carve != null)
-                        {
-                            carveShaderProp.objectReferenceValue = carve;
-                            Debug.Log("Loaded CarveVolume shader");
-                        }
+                        if (carve != null) carveShaderProp.objectReferenceValue = carve;
                     }
-                    
                     if (mipGenShaderProp.objectReferenceValue == null)
                     {
                         var mipGen = Resources.Load<ComputeShader>("Shaders/GenerateMips");
-                        if (mipGen != null)
-                        {
-                            mipGenShaderProp.objectReferenceValue = mipGen;
-                            Debug.Log("Loaded GenerateMips shader");
-                        }
+                        if (mipGen != null) mipGenShaderProp.objectReferenceValue = mipGen;
                     }
                 }
             }
@@ -97,82 +88,56 @@ namespace Excavation.Editor
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Runtime Controls", EditorStyles.boldLabel);
 
-                // Volume status
                 if (manager.CarveVolume != null)
                 {
                     EditorGUILayout.HelpBox(
-                        $"Volume Active: {manager.CarveVolume.width}×{manager.CarveVolume.height}×{manager.CarveVolume.volumeDepth}\n" +
+                        $"Volume: {manager.CarveVolume.width}×{manager.CarveVolume.height}×{manager.CarveVolume.volumeDepth}\n" +
                         $"MIP Levels: {manager.CarveVolume.mipmapCount}",
-                        MessageType.Info
-                    );
-                }
-                else
-                {
-                    EditorGUILayout.HelpBox("Volume not initialized", MessageType.Warning);
+                        MessageType.Info);
                 }
 
-                // Clear button
                 EditorGUI.BeginDisabledGroup(manager.CarveVolume == null);
-                if (GUILayout.Button("Clear Volume (Reset All Excavations)"))
+
+                if (GUILayout.Button("Rebake Layers (Destroys Carving!)"))
                 {
                     if (EditorUtility.DisplayDialog(
-                        "Clear Excavation Volume",
-                        "This will reset all excavations to pristine state. This cannot be undone!",
-                        "Clear",
-                        "Cancel"))
+                        "Rebake Layers",
+                        "This will clear all carving and re-bake layers from scratch.",
+                        "Rebake", "Cancel"))
                     {
-                        manager.ClearVolume();
-                        Debug.Log("[ExcavationManager] Volume cleared");
+                        manager.RebakeLayers();
                     }
                 }
-                EditorGUI.EndDisabledGroup();
 
                 EditorGUILayout.Space();
-
-                // Save/Load
-                EditorGUILayout.LabelField("Serialization", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField("Save / Load", EditorStyles.boldLabel);
                 
                 EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Save Volume to File"))
+                if (GUILayout.Button("Save"))
                 {
-                    string path = EditorUtility.SaveFilePanel(
-                        "Save Excavation Volume",
-                        Application.dataPath,
-                        "excavation.dat",
-                        "dat"
-                    );
-                    
+                    string path = EditorUtility.SaveFilePanel("Save Volume", Application.dataPath, "excavation.dat", "dat");
                     if (!string.IsNullOrEmpty(path))
                     {
-                        Debug.Log("Starting async save...");
-                        manager.SerializeVolumeAsync((data) => {
-                            System.IO.File.WriteAllBytes(path, data);
-                            Debug.Log($"[ExcavationManager] Volume saved to {path} ({data.Length / 1024f:F2} KB)");
+                        manager.SaveExcavation(path, (ok) =>
+                        {
+                            if (ok) Debug.Log($"Saved to {path}");
                         });
                     }
                 }
-                
-                if (GUILayout.Button("Load Volume from File"))
+                if (GUILayout.Button("Load"))
                 {
-                    string path = EditorUtility.OpenFilePanel(
-                        "Load Excavation Volume",
-                        Application.dataPath,
-                        "dat"
-                    );
-                    
+                    string path = EditorUtility.OpenFilePanel("Load Volume", Application.dataPath, "dat");
                     if (!string.IsNullOrEmpty(path))
-                    {
-                        byte[] data = System.IO.File.ReadAllBytes(path);
-                        manager.LoadVolume(data);
-                        Debug.Log($"[ExcavationManager] Volume loaded from {path}");
-                    }
+                        manager.LoadExcavation(path);
                 }
                 EditorGUILayout.EndHorizontal();
+
+                EditorGUI.EndDisabledGroup();
             }
             else
             {
                 EditorGUILayout.Space();
-                EditorGUILayout.HelpBox("Enter Play Mode to access runtime controls", MessageType.Info);
+                EditorGUILayout.HelpBox("Enter Play Mode for runtime controls (rebake, save/load).", MessageType.Info);
             }
         }
     }

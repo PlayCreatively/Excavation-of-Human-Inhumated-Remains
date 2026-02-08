@@ -4,7 +4,7 @@ using UnityEditor;
 namespace Excavation.Editor
 {
     /// <summary>
-    /// Custom editor for MaterialLayer to improve Inspector workflow.
+    /// Custom editor for MaterialLayer.
     /// </summary>
     [CustomEditor(typeof(Stratigraphy.MaterialLayer))]
     public class MaterialLayerEditor : UnityEditor.Editor
@@ -30,9 +30,10 @@ namespace Excavation.Editor
         {
             serializedObject.Update();
 
+            DrawPropertiesExcluding(serializedObject, "m_Script");
+
             var layer = (Stratigraphy.MaterialLayer)target;
 
-            // Header
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Material Layer", EditorStyles.boldLabel);
             EditorGUILayout.Space();
@@ -54,7 +55,6 @@ namespace Excavation.Editor
             // Material Properties
             EditorGUILayout.LabelField("Material Properties", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(hardnessProp);
-            EditorGUILayout.HelpBox("Hardness affects dig speed: 0 = very soft, 10 = very hard", MessageType.Info);
 
             EditorGUILayout.Space();
 
@@ -62,49 +62,58 @@ namespace Excavation.Editor
             EditorGUILayout.LabelField("Geometry Definition", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(geometryDataProp);
 
-            // Geometry type selector
             if (geometryDataProp.managedReferenceValue == null)
             {
-                EditorGUILayout.HelpBox("No geometry defined. Click '+' above to add geometry.", MessageType.Warning);
+                EditorGUILayout.HelpBox("No geometry defined. Choose a geometry type below.", MessageType.Warning);
                 
+                EditorGUILayout.LabelField("Bands (horizontal deposits):", EditorStyles.miniLabel);
                 if (GUILayout.Button("Add Depth Band"))
-                {
                     geometryDataProp.managedReferenceValue = new Stratigraphy.DepthBandGeometry();
-                }
                 if (GUILayout.Button("Add Noisy Depth Band"))
-                {
                     geometryDataProp.managedReferenceValue = new Stratigraphy.NoisyDepthBandGeometry();
-                }
-                if (GUILayout.Button("Add Cut (Pit/Posthole)"))
-                {
+
+                EditorGUILayout.Space(5);
+                EditorGUILayout.LabelField("Fills (discrete features):", EditorStyles.miniLabel);
+                if (GUILayout.Button("Add Cut Fill (Pit/Posthole)"))
                     geometryDataProp.managedReferenceValue = new Stratigraphy.CutGeometry();
-                }
-                if (GUILayout.Button("Add Ellipsoid (Mound)"))
-                {
+                if (GUILayout.Button("Add Ellipsoid Fill (Mound)"))
                     geometryDataProp.managedReferenceValue = new Stratigraphy.EllipsoidGeometry();
-                }
             }
             else
             {
-                // Show geometry type info
-                string geometryType = geometryDataProp.managedReferenceValue.GetType().Name;
-                EditorGUILayout.HelpBox($"Geometry Type: {geometryType}", MessageType.Info);
+                var geom = geometryDataProp.managedReferenceValue as Stratigraphy.LayerGeometryData;
+                if (geom != null)
+                {
+                    string typeName = geom.GetType().Name;
+                    string category = geom.Category.ToString();
+                    EditorGUILayout.HelpBox($"{typeName} ({category})", MessageType.Info);
+
+                    // Show computed Y values for depth bands (read-only)
+                    if (geom is Stratigraphy.DepthBandGeometry db)
+                    {
+                        EditorGUI.BeginDisabledGroup(true);
+                        EditorGUILayout.FloatField("Computed Top Y", db.computedTopY);
+                        EditorGUILayout.FloatField("Computed Bottom Y", db.computedBottomY);
+                        EditorGUI.EndDisabledGroup();
+                    }
+                    else if (geom is Stratigraphy.NoisyDepthBandGeometry ndb)
+                    {
+                        EditorGUI.BeginDisabledGroup(true);
+                        EditorGUILayout.FloatField("Computed Base Top Y", ndb.computedBaseTopY);
+                        EditorGUILayout.FloatField("Computed Base Bottom Y", ndb.computedBaseBottomY);
+                        EditorGUI.EndDisabledGroup();
+                    }
+                }
             }
 
             serializedObject.ApplyModifiedProperties();
 
-            // Preview section
+            // Preview
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
             
             Rect colorRect = EditorGUILayout.GetControlRect(false, 30);
             EditorGUI.DrawRect(colorRect, layer.baseColour);
-            EditorGUILayout.LabelField($"Color: {layer.baseColour}");
-
-            if (layer.geometryData != null)
-            {
-                EditorGUILayout.LabelField($"Operation: {layer.geometryData.operation}");
-            }
         }
     }
 }

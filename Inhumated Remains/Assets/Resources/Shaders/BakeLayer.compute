@@ -1,0 +1,32 @@
+// Bake a single layer's SDF into the volume texture.
+// Called once per layer during initialization.
+// Each layer unions solid geometry into the volume (min operation).
+#pragma kernel CSBakeLayer
+
+#include "../../Shaders/SDFGeometry.hlsl"
+
+RWTexture3D<float> Volume;
+
+float3 VolumeOrigin;  // Center of the volume
+float3 VolumeSize;
+float VoxelSize;
+
+int GeometryType;
+float4 LayerParams;
+float4 LayerParams2;
+
+[numthreads(8,8,8)]
+void CSBakeLayer(uint3 id : SV_DispatchThreadID)
+{
+    // Calculate world position of this voxel's center
+    float3 volumeMin = VolumeOrigin - 0.5 * VolumeSize;
+    float3 worldPos = volumeMin + (id + 0.5) * VoxelSize;
+
+    // Evaluate this layer's SDF at the voxel position
+    float layerSDF = EvaluateLayerSDF(worldPos, GeometryType, LayerParams, LayerParams2);
+
+    // Union solid geometry: min(existing, layerSDF)
+    // Both use convention: negative = solid, positive = air
+    float existing = Volume[id];
+    Volume[id] = min(existing, layerSDF);
+}

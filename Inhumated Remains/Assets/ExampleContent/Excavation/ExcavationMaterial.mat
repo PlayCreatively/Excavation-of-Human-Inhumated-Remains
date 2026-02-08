@@ -34,11 +34,12 @@ Material:
     - _DebugForceShowHits: 0
     - _DiffuseIntensity: 1.144
     - _EnableSelfShadows: 0
-    - _LayerCount: 2
+    - _FillCount: 0
+    - _LayerCount: 0
     - _MaxDistance: 21.3
     - _MaxMipLevel: 3
     - _MaxSteps: 95
-    - _NormalEpsilon: 0.137
+    - _NormalEpsilon: 0.028
     - _ShadowDistance: 5
     - _ShadowSoftness: 4
     - _ShadowSteps: 32

@@ -141,21 +141,7 @@ namespace Excavation.Rendering
             raymarchMaterial.SetFloat("_TextureTiling", settings.textureTiling);
             raymarchMaterial.SetFloat("_TextureSharpness", settings.textureSharpness);
 
-            // Base terrain Y from stratigraphy
-            if (stratigraphy != null)
-            {
-                raymarchMaterial.SetFloat("_BaseTerrainY", stratigraphy.BaseTerrainY);
-            }
-            else
-            {
-                raymarchMaterial.SetFloat("_BaseTerrainY", 0f);
-            }
-
-            // Camera position
-            if (Camera.main != null)
-            {
-                raymarchMaterial.SetVector("_CameraPosition", Camera.main.transform.position);
-            }
+            // No base terrain Y — terrain is baked into the volume texture
 
             // Lighting: Find main directional light
             Light mainLight = RenderSettings.sun;
@@ -189,58 +175,29 @@ namespace Excavation.Rendering
                 raymarchMaterial.SetColor("_MainLightColor", Color.white);
             }
 
-            // Layer data
+            // Layer data — packed in evaluation order via GetGPULayerData:
+            // fills first (youngest→oldest), then bands (oldest→youngest)
+            raymarchMaterial.SetInt("_MaxMipLevel", settings.GetMaxMipLevel());
+
             if (stratigraphy != null && stratigraphy.Layers != null)
             {
-                int layerCount = Mathf.Min(stratigraphy.Layers.Count, 8);
-                raymarchMaterial.SetInt("_LayerCount", layerCount);
-                raymarchMaterial.SetInt("_MaxMipLevel", settings.GetMaxMipLevel());
+                stratigraphy.GetGPULayerData(
+                    out Color[] colors, out Vector4[] layerParams, out Vector4[] layerParams2,
+                    out float[] geometryTypes, out int fillCount, out int totalCount);
 
-                Color[] layerColors = new Color[8];
-                Vector4[] layerParams = new Vector4[8];
-                Vector4[] layerParams2 = new Vector4[8]; // Secondary geometry parameters
-                float[] geometryTypes = new float[8];        // Geometry type IDs (as floats for shader)
-
-                for (int i = 0; i < 8; i++)
-                {
-                    if (i < layerCount && stratigraphy.Layers[i] != null)
-                    {
-                        var layer = stratigraphy.Layers[i];
-                        layerColors[i] = layer.baseColour;
-
-                        // Pass textures
-                        if (layer.albedoTexture != null)
-                            raymarchMaterial.SetTexture($"_LayerAlbedo{i}", layer.albedoTexture);
-                        if (layer.normalMap != null)
-                            raymarchMaterial.SetTexture($"_LayerNormal{i}", layer.normalMap);
-
-                        // Use polymorphic geometry parameter packing
-                        var geometry = layer.geometryData;
-                        if (geometry != null)
-                        {
-                            geometryTypes[i] = (int)geometry.GeometryType;
-                            layerParams[i] = geometry.GetPackedParams();
-                            layerParams2[i] = geometry.GetPackedParams2();
-                        }
-                    }
-                    else
-                    {
-                        layerColors[i] = Color.black;
-                        layerParams[i] = Vector4.zero;
-                        layerParams2[i] = Vector4.zero;
-                        geometryTypes[i] = 0f;
-                    }
-                }
-
-                raymarchMaterial.SetColorArray("_LayerColors", layerColors);
+                raymarchMaterial.SetInt("_LayerCount", totalCount);
+                raymarchMaterial.SetInt("_FillCount", fillCount);
+                raymarchMaterial.SetColorArray("_LayerColors", colors);
                 raymarchMaterial.SetVectorArray("_LayerParams", layerParams);
                 raymarchMaterial.SetVectorArray("_LayerParams2", layerParams2);
-                // Material doesn't expose SetIntArray on all platforms/versions, use float array instead
                 raymarchMaterial.SetFloatArray("_GeometryTypes", geometryTypes);
+
+                stratigraphy.SetLayerTextures(raymarchMaterial);
             }
             else
             {
                 raymarchMaterial.SetInt("_LayerCount", 0);
+                raymarchMaterial.SetInt("_FillCount", 0);
             }
         }
     }
