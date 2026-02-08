@@ -12,14 +12,12 @@ namespace Excavation.Stratigraphy
     /// </summary>
     public class StratigraphyEvaluator : MonoBehaviour
     {
-        [Header("Layer Configuration")]
         [Tooltip("Stratigraphic layers ordered from youngest (top) to oldest (bottom)")]
         [SerializeField] private List<MaterialLayer> layers = new List<MaterialLayer>();
 
         [Tooltip("Default substrate material (when no layers match)")]
         [SerializeField] private MaterialLayer defaultSubstrate;
 
-        [Header("Base Terrain")]
         [Tooltip("Base terrain Y level (flat ground)")]
         [SerializeField] private float baseTerrainY = 0f;
 
@@ -27,11 +25,6 @@ namespace Excavation.Stratigraphy
         /// Public accessor for the base terrain Y level.
         /// </summary>
         public float BaseTerrainY => baseTerrainY;
-
-        [Header("Debug")]
-        [SerializeField] private bool drawGizmos = true;
-        [SerializeField] private bool debugSphereTrace = false;
-        public Vector3 debugPosition = Vector3.zero;
 
         [Header("GPU Query")]
         [Tooltip("Compute shader for GPU SDF queries (optional, improves performance)")]
@@ -327,44 +320,5 @@ namespace Excavation.Stratigraphy
         }
 
         #endregion
-
-        void OnDrawGizmos()
-        {
-            if (!drawGizmos || layers == null) return;
-
-            // Draw layer boundaries as wireframe boxes (approximate)
-            foreach (var layer in layers)
-            {
-                if (layer == null || layer.geometryData == null)
-                    continue;
-
-                Gizmos.color = layer.baseColour;
-
-                // Draw different gizmos based on geometry type
-                if (layer.geometryData is DepthBandGeometry depth)
-                {
-                    Vector3 center = new Vector3(0, (depth.topY + depth.bottomY) * 0.5f, 0);
-                    Vector3 size = new Vector3(10, depth.topY - depth.bottomY, 10);
-                    Gizmos.DrawWireCube(center, size);
-                }
-                else if (layer.geometryData is CutGeometry cut)
-                {
-                    Gizmos.DrawWireSphere(cut.centre, cut.radius);
-                }
-                else if (layer.geometryData is EllipsoidGeometry ellipsoid)
-                {
-                    Gizmos.matrix = Matrix4x4.TRS(ellipsoid.centre, Quaternion.identity, ellipsoid.radii);
-                    Gizmos.DrawWireSphere(Vector3.zero, 1f);
-                    Gizmos.matrix = Matrix4x4.identity;
-                }
-            }
-
-            // Debug sphere trace
-            if (debugSphereTrace)
-            {
-                Gizmos.color = Color.yellow;
-                Gizmos.DrawWireSphere(debugPosition, 0.1f);
-            }
-        }
     }
 }

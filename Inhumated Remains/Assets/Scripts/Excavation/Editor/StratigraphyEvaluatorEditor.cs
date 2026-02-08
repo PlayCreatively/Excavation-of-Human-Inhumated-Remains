@@ -13,18 +13,12 @@ namespace Excavation.Editor
         private SerializedProperty layersProp;
         private SerializedProperty defaultSubstrateProp;
         private SerializedProperty baseTerrainYProp;
-        private SerializedProperty drawGizmosProp;
-        private SerializedProperty debugSphereTraceProp;
-        private SerializedProperty debugPositionProp;
 
         void OnEnable()
         {
             layersProp = serializedObject.FindProperty("layers");
             defaultSubstrateProp = serializedObject.FindProperty("defaultSubstrate");
             baseTerrainYProp = serializedObject.FindProperty("baseTerrainY");
-            drawGizmosProp = serializedObject.FindProperty("drawGizmos");
-            debugSphereTraceProp = serializedObject.FindProperty("debugSphereTrace");
-            debugPositionProp = serializedObject.FindProperty("debugPosition");
         }
 
         public override void OnInspectorGUI()
@@ -68,7 +62,7 @@ namespace Excavation.Editor
                         
                         // Additional info
                         EditorGUI.indentLevel++;
-                        EditorGUILayout.LabelField($"Hardness: {layer.hardness}/10");
+                        EditorGUILayout.LabelField($"Hardness: {Mathf.RoundToInt(layer.hardness/10f * 100f)}%");
                         if (layer.geometryData != null)
                         {
                             EditorGUILayout.LabelField($"Geometry: {layer.geometryData.GetType().Name} ({layer.geometryData.operation})");
@@ -94,34 +88,6 @@ namespace Excavation.Editor
             EditorGUILayout.PropertyField(baseTerrainYProp);
 
             EditorGUILayout.Space();
-
-            // Debug
-            EditorGUILayout.LabelField("Debug", EditorStyles.boldLabel);
-            EditorGUILayout.PropertyField(drawGizmosProp);
-            EditorGUILayout.PropertyField(debugSphereTraceProp);
-            
-            if (debugSphereTraceProp.boolValue)
-            {
-                EditorGUILayout.PropertyField(debugPositionProp);
-                
-                // Test SDF button
-                if (GUILayout.Button("Test SDF at Debug Position"))
-                {
-                    if (Application.isPlaying)
-                    {
-                        float sdf = evaluator.GetSceneSDF(evaluator.debugPosition, null);
-                        var material = evaluator.GetMaterialAt(evaluator.debugPosition);
-                        
-                        Debug.Log($"[Stratigraphy Test] Position: {evaluator.debugPosition}\n" +
-                                  $"SDF Value: {sdf}\n" +
-                                  $"Material: {(material != null ? material.layerName : "None")}");
-                    }
-                    else
-                    {
-                        EditorGUILayout.HelpBox("Enter Play Mode to test SDF evaluation.", MessageType.Info);
-                    }
-                }
-            }
 
             serializedObject.ApplyModifiedProperties();
         }
