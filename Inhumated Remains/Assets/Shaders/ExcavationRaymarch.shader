@@ -4,7 +4,7 @@ Shader "Excavation/ExcavationRaymarch"
     {
         // Volume Data
         _CarveVolume("Carve Volume", 3D) = "white" {}
-        _VolumeOrigin("Volume Origin", Vector) = (0, 0, 0, 0)
+        _VolumeMin("Volume Min", Vector) = (0, 0, 0, 0)
         _VolumeSize("Volume Size", Vector) = (10, 5, 10, 0)
         _VoxelSize("Voxel Size", Float) = 0.05
         _MaxMipLevel("Max MIP Level", Int) = 4
@@ -91,7 +91,7 @@ Shader "Excavation/ExcavationRaymarch"
             };
             
             // Shader properties
-            float3 _VolumeOrigin;
+            float3 _VolumeMin;
             float3 _VolumeSize;
             float _VoxelSize;
             int _MaxMipLevel;
@@ -159,8 +159,7 @@ Shader "Excavation/ExcavationRaymarch"
             float EvaluateSceneSDF(float3 cameraRelativePos, int mipLevel)
             {
                 float3 absoluteWorldPos = cameraRelativePos + _WorldSpaceCameraPos;
-                float3 volumeMin = _VolumeOrigin - 0.5 * _VolumeSize;
-                float3 uvw = WorldToUVW(absoluteWorldPos, volumeMin, _VolumeSize);
+                float3 uvw = WorldToUVW(absoluteWorldPos, _VolumeMin, _VolumeSize);
 
                 // Outside volume = air
                 if (any(uvw < 0.0) || any(uvw > 1.0))
@@ -376,8 +375,8 @@ Shader "Excavation/ExcavationRaymarch"
                 float3 rayDir = normalize(input.positionWS);
 
                 // Volume AABB in camera-relative space
-                float3 boxMin = (_VolumeOrigin - 0.5 * _VolumeSize) - _WorldSpaceCameraPos;
-                float3 boxMax = (_VolumeOrigin + 0.5 * _VolumeSize) - _WorldSpaceCameraPos;
+                float3 boxMin = _VolumeMin - _WorldSpaceCameraPos;
+                float3 boxMax = (_VolumeMin + _VolumeSize) - _WorldSpaceCameraPos;
 
                 float tEnter, tExit;
                 if (!RayAABBIntersect(rayOrigin, rayDir, boxMin, boxMax, tEnter, tExit))

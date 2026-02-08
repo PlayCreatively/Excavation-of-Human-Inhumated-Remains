@@ -10,7 +10,7 @@ namespace Excavation.Core
     public class ExcavationVolumeSettings : ScriptableObject
     {
         [Header("Volume Bounds")]
-        [Tooltip("World-space center point of the excavation volume")]
+        [Tooltip("World-space top-center of the excavation volume (surface origin point)")]
         public Vector3 worldOrigin = Vector3.zero;
 
         [Tooltip("World-space size of the excavation volume")]
@@ -44,6 +44,22 @@ namespace Excavation.Core
         [Tooltip("Sharpness of triplanar texture blending (higher = sharper transitions)")]
         [Range(1f, 64f)]
         public float textureSharpness = 8.0f;
+
+        /// <summary>
+        /// Center of the volume in world space.
+        /// Origin is top-center, so center is half the height below.
+        /// </summary>
+        public Vector3 VolumeCenter => worldOrigin - new Vector3(0f, worldSize.y * 0.5f, 0f);
+
+        /// <summary>
+        /// Minimum corner of the volume in world space.
+        /// </summary>
+        public Vector3 VolumeMin => worldOrigin - new Vector3(worldSize.x * 0.5f, worldSize.y, worldSize.z * 0.5f);
+
+        /// <summary>
+        /// Maximum corner of the volume in world space.
+        /// </summary>
+        public Vector3 VolumeMax => worldOrigin + new Vector3(worldSize.x * 0.5f, 0f, worldSize.z * 0.5f);
 
         /// <summary>
         /// Calculate the texture resolution based on world size and voxel size.

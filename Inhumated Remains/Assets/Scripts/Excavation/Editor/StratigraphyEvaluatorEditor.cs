@@ -136,8 +136,6 @@ namespace Excavation.Editor
                 var layerProp = layersProp.GetArrayElementAtIndex(i);
                 var layer = layerProp.objectReferenceValue as Stratigraphy.MaterialLayer;
 
-                Debug.Log($"Drawing layer {i}: {layer?.layerName} with geometry {layer?.geometryData?.GetType().Name}");
-
                 if (layer == null || layer.geometryData == null) continue;
 
                 if (layer.geometryData is Stratigraphy.DepthBandGeometry db)

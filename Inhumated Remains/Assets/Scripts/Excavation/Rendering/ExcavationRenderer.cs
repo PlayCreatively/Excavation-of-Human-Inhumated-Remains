@@ -100,7 +100,7 @@ namespace Excavation.Rendering
 
             // Volume data
             mat.SetTexture("_CarveVolume", excavationManager.CarveVolume);
-            mat.SetVector("_VolumeOrigin", settings.worldOrigin);
+            mat.SetVector("_VolumeMin", settings.VolumeMin);
             mat.SetVector("_VolumeSize", settings.worldSize);
             mat.SetFloat("_VoxelSize", settings.voxelSize);
 

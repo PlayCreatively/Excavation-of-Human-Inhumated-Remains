@@ -156,7 +156,7 @@ namespace Excavation.Core
             carveShader.SetFloat("BrushRadius", stroke.radius);
             carveShader.SetFloat("DigSpeed", stroke.intensity);
             carveShader.SetFloat("DeltaTime", stroke.deltaTime);
-            carveShader.SetVector("VolumeOrigin", settings.worldOrigin);
+            carveShader.SetVector("VolumeMin", settings.VolumeMin);
             carveShader.SetFloat("VoxelSize", settings.voxelSize);
             carveShader.SetVector("VolumeSize", settings.worldSize);
 
@@ -213,8 +213,7 @@ namespace Excavation.Core
 
         public Vector3Int WorldToVoxel(Vector3 worldPos)
         {
-            Vector3 volumeMin = settings.worldOrigin - settings.worldSize * 0.5f;
-            Vector3 local = worldPos - volumeMin;
+            Vector3 local = worldPos - settings.VolumeMin;
             return new Vector3Int(
                 Mathf.FloorToInt(local.x / settings.voxelSize),
                 Mathf.FloorToInt(local.y / settings.voxelSize),
@@ -224,8 +223,7 @@ namespace Excavation.Core
 
         public Vector3 VoxelToWorld(Vector3Int voxel)
         {
-            Vector3 volumeMin = settings.worldOrigin - settings.worldSize * 0.5f;
-            return volumeMin + new Vector3(
+            return settings.VolumeMin + new Vector3(
                 (voxel.x + 0.5f) * settings.voxelSize,
                 (voxel.y + 0.5f) * settings.voxelSize,
                 (voxel.z + 0.5f) * settings.voxelSize
@@ -233,6 +231,9 @@ namespace Excavation.Core
         }
 
         #region Serialization (Save/Load full texture)
+
+        // File format: [12-byte header: int32 resX, resY, resZ] + [gzip compressed float data]
+        private const int HEADER_SIZE = 12;
 
         public void SerializeVolumeAsync(Action<byte[]> callback)
         {
@@ -260,7 +261,15 @@ namespace Excavation.Core
                     System.Buffer.BlockCopy(floatArray, 0, rawData, 0, rawData.Length);
 
                     using var outputStream = new MemoryStream();
-                    using (var gzipStream = new GZipStream(outputStream, CompressionMode.Compress))
+
+                    // Write resolution header (uncompressed)
+                    var bw = new BinaryWriter(outputStream);
+                    bw.Write(resolution.x);
+                    bw.Write(resolution.y);
+                    bw.Write(resolution.z);
+
+                    // Write gzip-compressed voxel data
+                    using (var gzipStream = new GZipStream(outputStream, CompressionMode.Compress, leaveOpen: true))
                     {
                         gzipStream.Write(rawData, 0, rawData.Length);
                     }
@@ -274,30 +283,75 @@ namespace Excavation.Core
             });
         }
 
-        public void LoadVolume(byte[] compressedData)
+        public void LoadVolume(byte[] fileData)
         {
-            if (compressedData == null || carveVolume == null) return;
+            if (fileData == null || carveVolume == null)
+            {
+                Debug.LogError("[ExcavationManager] Cannot load: " +
+                    (fileData == null ? "file data is null" : "volume texture not initialized (are you in Play mode?)"));
+                return;
+            }
 
             try
             {
-                using var inputStream = new MemoryStream(compressedData);
+                using var inputStream = new MemoryStream(fileData);
+
+                // Detect format: gzip magic bytes (0x1F 0x8B) = legacy, otherwise new header
+                bool isLegacy = fileData.Length >= 2 && fileData[0] == 0x1F && fileData[1] == 0x8B;
+
+                int loadResX = resolution.x;
+                int loadResY = resolution.y;
+                int loadResZ = resolution.z;
+
+                if (!isLegacy)
+                {
+                    var br = new BinaryReader(inputStream);
+                    int savedResX = br.ReadInt32();
+                    int savedResY = br.ReadInt32();
+                    int savedResZ = br.ReadInt32();
+
+                    if (savedResX != resolution.x || savedResY != resolution.y || savedResZ != resolution.z)
+                    {
+                        Debug.LogError($"[ExcavationManager] Resolution mismatch: " +
+                            $"file has {savedResX}x{savedResY}x{savedResZ}, " +
+                            $"current volume is {resolution.x}x{resolution.y}x{resolution.z}. " +
+                            $"Adjust volume settings to match or re-save.");
+                        return;
+                    }
+
+                    loadResX = savedResX;
+                    loadResY = savedResY;
+                    loadResZ = savedResZ;
+                }
+                else
+                {
+                    Debug.LogWarning("[ExcavationManager] Detected legacy save format (no header). " +
+                        "Will attempt to load assuming current resolution. Re-save to upgrade.");
+                }
+
+                // Decompress voxel data
                 using var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress);
-                using var outputStream = new MemoryStream();
+                using var decompressed = new MemoryStream();
+                gzipStream.CopyTo(decompressed);
+                byte[] rawData = decompressed.ToArray();
 
-                gzipStream.CopyTo(outputStream);
-                byte[] rawData = outputStream.ToArray();
-
-                int expectedSize = resolution.x * resolution.y * resolution.z * sizeof(float);
+                int expectedSize = loadResX * loadResY * loadResZ * sizeof(float);
                 if (rawData.Length != expectedSize)
                 {
-                    Debug.LogError($"[ExcavationManager] Size mismatch: expected {expectedSize}, got {rawData.Length}");
+                    // Try to infer resolution from data size for legacy files
+                    int voxelCount = rawData.Length / sizeof(float);
+                    Debug.LogError($"[ExcavationManager] Data size mismatch: " +
+                        $"expected {expectedSize} bytes ({loadResX}x{loadResY}x{loadResZ} = {loadResX * loadResY * loadResZ} voxels), " +
+                        $"got {rawData.Length} bytes ({voxelCount} voxels). " +
+                        (isLegacy ? "Legacy file was likely saved with different volume settings. " : "") +
+                        "Delete old save and re-save with current settings.");
                     return;
                 }
 
-                float[] floatData = new float[resolution.x * resolution.y * resolution.z];
+                float[] floatData = new float[loadResX * loadResY * loadResZ];
                 System.Buffer.BlockCopy(rawData, 0, floatData, 0, rawData.Length);
 
-                Texture3D temp = new Texture3D(resolution.x, resolution.y, resolution.z, TextureFormat.RFloat, false);
+                Texture3D temp = new Texture3D(loadResX, loadResY, loadResZ, TextureFormat.RFloat, false);
                 temp.SetPixelData(floatData, 0);
                 temp.Apply(false, false);
 
@@ -306,11 +360,11 @@ namespace Excavation.Core
 
                 RegenerateMips();
 
-                Debug.Log("[ExcavationManager] Volume loaded (includes baked layers + carving)");
+                Debug.Log($"[ExcavationManager] Volume loaded ({loadResX}x{loadResY}x{loadResZ}, {fileData.Length} bytes on disk)");
             }
             catch (Exception e)
             {
-                Debug.LogError($"[ExcavationManager] Failed to load volume: {e.Message}");
+                Debug.LogError($"[ExcavationManager] Failed to load volume: {e.Message}\n{e.StackTrace}");
             }
         }
 
@@ -363,8 +417,23 @@ namespace Excavation.Core
         void OnDrawGizmosSelected()
         {
             if (settings == null) return;
+
+            // Volume bounds
             Gizmos.color = Color.cyan;
-            Gizmos.DrawWireCube(settings.worldOrigin, settings.worldSize);
+            Gizmos.DrawWireCube(settings.VolumeCenter, settings.worldSize);
+
+            // Surface origin (top-center of volume)
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireSphere(settings.worldOrigin, 0.05f);
+
+            // Top face outline
+            Gizmos.color = new Color(1f, 1f, 0f, 0.3f);
+            Vector3 o = settings.worldOrigin;
+            Vector3 hs = settings.worldSize * 0.5f;
+            Gizmos.DrawLine(o + new Vector3(-hs.x, 0, -hs.z), o + new Vector3( hs.x, 0, -hs.z));
+            Gizmos.DrawLine(o + new Vector3( hs.x, 0, -hs.z), o + new Vector3( hs.x, 0,  hs.z));
+            Gizmos.DrawLine(o + new Vector3( hs.x, 0,  hs.z), o + new Vector3(-hs.x, 0,  hs.z));
+            Gizmos.DrawLine(o + new Vector3(-hs.x, 0,  hs.z), o + new Vector3(-hs.x, 0, -hs.z));
         }
     }
 }

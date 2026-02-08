@@ -158,7 +158,7 @@ namespace Excavation.Stratigraphy
             int kernel = bakeLayerShader.FindKernel("CSBakeLayer");
 
             // Set volume-wide parameters
-            bakeLayerShader.SetVector("VolumeOrigin", settings.worldOrigin);
+            bakeLayerShader.SetVector("VolumeMin", settings.VolumeMin);
             bakeLayerShader.SetVector("VolumeSize", settings.worldSize);
             bakeLayerShader.SetFloat("VoxelSize", settings.voxelSize);
 
@@ -376,7 +376,7 @@ namespace Excavation.Stratigraphy
             sdfQueryShader.SetBuffer(kernel, "_QueryPositions", queryPositionsBuffer);
             sdfQueryShader.SetBuffer(kernel, "_QueryResults", queryResultsBuffer);
             sdfQueryShader.SetTexture(kernel, "_CarveVolume", excavationManager.CarveVolume);
-            sdfQueryShader.SetVector("_VolumeOrigin", settings.worldOrigin);
+            sdfQueryShader.SetVector("_VolumeMin", settings.VolumeMin);
             sdfQueryShader.SetVector("_VolumeSize", settings.worldSize);
             sdfQueryShader.SetInt("_QueryCount", count);
 

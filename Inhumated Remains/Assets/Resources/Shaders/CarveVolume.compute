@@ -9,7 +9,7 @@ float3 BrushPosition;
 float BrushRadius;
 float DigSpeed;
 float DeltaTime;
-float3 VolumeOrigin;
+float3 VolumeMin;
 float VoxelSize;
 float3 VolumeSize;
 int3 MinVoxel;
@@ -20,8 +20,7 @@ void CSCarve(uint3 id : SV_DispatchThreadID)
     uint3 voxelIndex = MinVoxel + id;
 
     // World position of voxel center
-    float3 volumeMin = VolumeOrigin - 0.5 * VolumeSize;
-    float3 voxelWorldPos = volumeMin + (voxelIndex + 0.5) * VoxelSize;
+    float3 voxelWorldPos = VolumeMin + (voxelIndex + 0.5) * VoxelSize;
 
     // Brush SDF: negative inside brush, positive outside
     float brushSDF = length(voxelWorldPos - BrushPosition) - BrushRadius;

@@ -62,33 +62,36 @@ namespace Excavation.Rendering
 
         /// <summary>
         /// Generate a cube mesh that encompasses the excavation volume.
-        /// This is what we render with the raymarching shader.
+        /// Pivot is at the top-center so the mesh extends downward from the transform position.
+        /// This matches the ExcavationVolumeSettings convention where worldOrigin = top-center.
         /// </summary>
         private Mesh GenerateProxyMesh()
         {
             var settings = excavationManager.Settings;
 
-            // Create a cube mesh with the volume's dimensions
             Mesh mesh = new()
             {
                 name = "Excavation Proxy"
             };
 
-            // Simple cube vertices (local space, centered at origin)
-            Vector3 halfSize = settings.worldSize * 0.5f;
+            // Pivot at top-center: Y goes from 0 (top) to -worldSize.y (bottom)
+            // X/Z centered
+            float halfX = settings.worldSize.x * 0.5f;
+            float halfZ = settings.worldSize.z * 0.5f;
+            float height = settings.worldSize.y;
             Vector3[] vertices = new Vector3[]
             {
                 // Front face
-                new (-halfSize.x, -halfSize.y, -halfSize.z),
-                new ( halfSize.x, -halfSize.y, -halfSize.z),
-                new ( halfSize.x,  halfSize.y, -halfSize.z),
-                new (-halfSize.x,  halfSize.y, -halfSize.z),
+                new (-halfX, -height, -halfZ),
+                new ( halfX, -height, -halfZ),
+                new ( halfX,  0,      -halfZ),
+                new (-halfX,  0,      -halfZ),
                 
                 // Back face
-                new (-halfSize.x, -halfSize.y,  halfSize.z),
-                new ( halfSize.x, -halfSize.y,  halfSize.z),
-                new ( halfSize.x,  halfSize.y,  halfSize.z),
-                new (-halfSize.x,  halfSize.y,  halfSize.z),
+                new (-halfX, -height,  halfZ),
+                new ( halfX, -height,  halfZ),
+                new ( halfX,  0,       halfZ),
+                new (-halfX,  0,       halfZ),
             };
 
             int[] triangles = new int[]
@@ -130,7 +133,7 @@ namespace Excavation.Rendering
 
             // Volume data
             raymarchMaterial.SetTexture("_CarveVolume", excavationManager.CarveVolume);
-            raymarchMaterial.SetVector("_VolumeOrigin", settings.worldOrigin);
+            raymarchMaterial.SetVector("_VolumeMin", settings.VolumeMin);
             raymarchMaterial.SetVector("_VolumeSize", settings.worldSize);
             raymarchMaterial.SetFloat("_VoxelSize", settings.voxelSize);
 

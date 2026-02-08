@@ -7,7 +7,7 @@
 
 RWTexture3D<float> Volume;
 
-float3 VolumeOrigin;  // Center of the volume
+float3 VolumeMin;  // Minimum corner of the volume
 float3 VolumeSize;
 float VoxelSize;
 
@@ -19,8 +19,7 @@ float4 LayerParams2;
 void CSBakeLayer(uint3 id : SV_DispatchThreadID)
 {
     // Calculate world position of this voxel's center
-    float3 volumeMin = VolumeOrigin - 0.5 * VolumeSize;
-    float3 worldPos = volumeMin + (id + 0.5) * VoxelSize;
+    float3 worldPos = VolumeMin + (id + 0.5) * VoxelSize;
 
     // Evaluate this layer's SDF at the voxel position
     float layerSDF = EvaluateLayerSDF(worldPos, GeometryType, LayerParams, LayerParams2);
