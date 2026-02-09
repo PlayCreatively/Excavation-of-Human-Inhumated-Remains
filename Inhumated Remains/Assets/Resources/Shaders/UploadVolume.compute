@@ -1,0 +1,17 @@
+// Upload float data from a ComputeBuffer into a RWTexture3D.
+// Used for loading saved volume data back into the GPU texture.
+#pragma kernel CSUpload
+
+RWTexture3D<float> Volume;
+StructuredBuffer<float> SourceData;
+int3 Resolution;
+
+[numthreads(8,8,8)]
+void CSUpload(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= (uint3)Resolution))
+        return;
+
+    int index = id.x + id.y * Resolution.x + id.z * Resolution.x * Resolution.y;
+    Volume[id] = SourceData[index];
+}

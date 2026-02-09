@@ -117,12 +117,7 @@ namespace Excavation.Editor
                 {
                     string path = EditorUtility.SaveFilePanel("Save Volume", Application.dataPath, "excavation.dat", "dat");
                     if (!string.IsNullOrEmpty(path))
-                    {
-                        manager.SaveExcavation(path, (ok) =>
-                        {
-                            if (ok) Debug.Log($"Saved to {path}");
-                        });
-                    }
+                        manager.SaveExcavation(path);
                 }
                 if (GUILayout.Button("Load"))
                 {

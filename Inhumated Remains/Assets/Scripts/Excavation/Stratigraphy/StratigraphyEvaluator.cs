@@ -51,8 +51,18 @@ namespace Excavation.Stratigraphy
         private readonly List<MaterialLayer> fills = new();
         private readonly List<MaterialLayer> bands = new();
 
+        // Dirty flag: set in OnValidate, cleared after re-bake
+        private bool isDirty = false;
+
         public List<MaterialLayer> Layers => layers;
         public float SurfaceY => surfaceY;
+
+        /// <summary>
+        /// True when layer parameters have changed and the volume needs re-baking.
+        /// Cleared by calling ClearDirty() after re-baking.
+        /// </summary>
+        public bool IsDirty => isDirty;
+        public void ClearDirty() => isDirty = false;
 
         /// <summary>
         /// Initialize layer data: compute band Y positions and cache fill/band lists.
@@ -141,6 +151,7 @@ namespace Excavation.Stratigraphy
         void OnValidate()
         {
             InitializeLayers();
+            isDirty = true;
         }
 
         /// <summary>

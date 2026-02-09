@@ -1,0 +1,17 @@
+// Download float data from a Texture3D into a ComputeBuffer.
+// Used for saving volume data from the GPU.
+#pragma kernel CSDownload
+
+Texture3D<float> Volume;
+RWStructuredBuffer<float> DestData;
+int3 Resolution;
+
+[numthreads(8,8,8)]
+void CSDownload(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id >= (uint3)Resolution))
+        return;
+
+    int index = id.x + id.y * Resolution.x + id.z * Resolution.x * Resolution.y;
+    DestData[index] = Volume[id];
+}

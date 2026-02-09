@@ -32,12 +32,8 @@ namespace Excavation.Core
         // Texture resolution
         private Vector3Int resolution;
 
-        // Serialization state
-        private bool serializationInProgress = false;
-
         public RenderTexture CarveVolume => carveVolume;
         public ExcavationVolumeSettings Settings => settings;
-        public bool IsSerializationInProgress => serializationInProgress;
 
         void Start()
         {
@@ -50,6 +46,21 @@ namespace Excavation.Core
 
             InitializeVolume();
             BakeLayers();
+
+            // Clear dirty flag from any OnValidate calls during scene load
+            if (stratigraphy != null)
+                stratigraphy.ClearDirty();
+        }
+
+        void Update()
+        {
+            // Auto-rebake when stratigraphy parameters change at runtime
+            if (stratigraphy != null && stratigraphy.IsDirty && carveVolume != null)
+            {
+                Debug.Log("[ExcavationManager] Stratigraphy changed, re-baking...");
+                RebakeLayers();
+                stratigraphy.ClearDirty();
+            }
         }
 
         /// <summary>
@@ -230,175 +241,173 @@ namespace Excavation.Core
             );
         }
 
-        #region Serialization (Save/Load full texture)
+        #region Serialization
 
-        // File format: [12-byte header: int32 resX, resY, resZ] + [gzip compressed float data]
-        private const int HEADER_SIZE = 12;
+        // File format: [int32 resX][int32 resY][int32 resZ][gzip compressed float[] data]
+        // Voxel layout: x + y * resX + z * resX * resY (matches compute shader indexing)
 
-        public void SerializeVolumeAsync(Action<byte[]> callback)
+        /// <summary>
+        /// Read the volume from GPU into a float array via compute shader + buffer.
+        /// AsyncGPUReadback on 3D RenderTextures only returns one slice in many
+        /// Unity versions, so we use a compute shader to copy texture → buffer first.
+        /// </summary>
+        private float[] ReadVolumeFromGPU()
         {
-            if (carveVolume == null) { callback?.Invoke(null); return; }
-            if (serializationInProgress) { callback?.Invoke(null); return; }
-
-            serializationInProgress = true;
-
-            AsyncGPUReadback.Request(carveVolume, 0, (request) =>
+            var downloadShader = Resources.Load<ComputeShader>("Shaders/DownloadVolume");
+            if (downloadShader == null)
             {
-                serializationInProgress = false;
+                Debug.LogError("[ExcavationManager] DownloadVolume compute shader not found.");
+                return null;
+            }
 
-                if (request.hasError)
-                {
-                    Debug.LogError("[ExcavationManager] GPU readback failed");
-                    callback?.Invoke(null);
-                    return;
-                }
+            int voxelCount = resolution.x * resolution.y * resolution.z;
+            var buffer = new ComputeBuffer(voxelCount, sizeof(float));
 
-                try
-                {
-                    var data = request.GetData<float>();
-                    byte[] rawData = new byte[data.Length * sizeof(float)];
-                    float[] floatArray = data.ToArray();
-                    System.Buffer.BlockCopy(floatArray, 0, rawData, 0, rawData.Length);
+            int kernel = downloadShader.FindKernel("CSDownload");
+            downloadShader.SetTexture(kernel, "Volume", carveVolume);
+            downloadShader.SetBuffer(kernel, "DestData", buffer);
+            downloadShader.SetInts("Resolution", resolution.x, resolution.y, resolution.z);
 
-                    using var outputStream = new MemoryStream();
+            int groupsX = Mathf.Max(1, Mathf.CeilToInt(resolution.x / 8f));
+            int groupsY = Mathf.Max(1, Mathf.CeilToInt(resolution.y / 8f));
+            int groupsZ = Mathf.Max(1, Mathf.CeilToInt(resolution.z / 8f));
+            downloadShader.Dispatch(kernel, groupsX, groupsY, groupsZ);
 
-                    // Write resolution header (uncompressed)
-                    var bw = new BinaryWriter(outputStream);
-                    bw.Write(resolution.x);
-                    bw.Write(resolution.y);
-                    bw.Write(resolution.z);
+            float[] result = new float[voxelCount];
+            buffer.GetData(result);
+            buffer.Release();
 
-                    // Write gzip-compressed voxel data
-                    using (var gzipStream = new GZipStream(outputStream, CompressionMode.Compress, leaveOpen: true))
-                    {
-                        gzipStream.Write(rawData, 0, rawData.Length);
-                    }
-                    callback?.Invoke(outputStream.ToArray());
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"[ExcavationManager] Serialization failed: {e.Message}");
-                    callback?.Invoke(null);
-                }
-            });
+            return result;
         }
 
-        public void LoadVolume(byte[] fileData)
+        /// <summary>
+        /// Write a float array into the GPU volume via compute buffer + compute shader.
+        /// This is reliable for 3D textures unlike Graphics.CopyTexture.
+        /// </summary>
+        private void WriteVolumeToGPU(float[] floatData)
         {
-            if (fileData == null || carveVolume == null)
+            var uploadShader = Resources.Load<ComputeShader>("Shaders/UploadVolume");
+            if (uploadShader == null)
             {
-                Debug.LogError("[ExcavationManager] Cannot load: " +
-                    (fileData == null ? "file data is null" : "volume texture not initialized (are you in Play mode?)"));
+                Debug.LogError("[ExcavationManager] UploadVolume compute shader not found.");
+                return;
+            }
+
+            int voxelCount = resolution.x * resolution.y * resolution.z;
+            var buffer = new ComputeBuffer(voxelCount, sizeof(float));
+            buffer.SetData(floatData);
+
+            int kernel = uploadShader.FindKernel("CSUpload");
+            uploadShader.SetTexture(kernel, "Volume", carveVolume);
+            uploadShader.SetBuffer(kernel, "SourceData", buffer);
+            uploadShader.SetInts("Resolution", resolution.x, resolution.y, resolution.z);
+
+            int groupsX = Mathf.Max(1, Mathf.CeilToInt(resolution.x / 8f));
+            int groupsY = Mathf.Max(1, Mathf.CeilToInt(resolution.y / 8f));
+            int groupsZ = Mathf.Max(1, Mathf.CeilToInt(resolution.z / 8f));
+            uploadShader.Dispatch(kernel, groupsX, groupsY, groupsZ);
+
+            buffer.Release();
+        }
+
+        /// <summary>
+        /// Save the volume to a file.
+        /// </summary>
+        public void SaveExcavation(string filePath)
+        {
+            if (carveVolume == null)
+            {
+                Debug.LogError("[ExcavationManager] Cannot save: volume not initialized.");
                 return;
             }
 
             try
             {
-                using var inputStream = new MemoryStream(fileData);
+                float[] floatData = ReadVolumeFromGPU();
+                if (floatData == null) return;
 
-                // Detect format: gzip magic bytes (0x1F 0x8B) = legacy, otherwise new header
-                bool isLegacy = fileData.Length >= 2 && fileData[0] == 0x1F && fileData[1] == 0x8B;
+                byte[] rawData = new byte[floatData.Length * sizeof(float)];
+                System.Buffer.BlockCopy(floatData, 0, rawData, 0, rawData.Length);
 
-                int loadResX = resolution.x;
-                int loadResY = resolution.y;
-                int loadResZ = resolution.z;
+                using var stream = new MemoryStream();
+                var bw = new BinaryWriter(stream);
+                bw.Write(resolution.x);
+                bw.Write(resolution.y);
+                bw.Write(resolution.z);
 
-                if (!isLegacy)
-                {
-                    var br = new BinaryReader(inputStream);
-                    int savedResX = br.ReadInt32();
-                    int savedResY = br.ReadInt32();
-                    int savedResZ = br.ReadInt32();
+                using (var gz = new GZipStream(stream, CompressionMode.Compress, leaveOpen: true))
+                    gz.Write(rawData, 0, rawData.Length);
 
-                    if (savedResX != resolution.x || savedResY != resolution.y || savedResZ != resolution.z)
-                    {
-                        Debug.LogError($"[ExcavationManager] Resolution mismatch: " +
-                            $"file has {savedResX}x{savedResY}x{savedResZ}, " +
-                            $"current volume is {resolution.x}x{resolution.y}x{resolution.z}. " +
-                            $"Adjust volume settings to match or re-save.");
-                        return;
-                    }
-
-                    loadResX = savedResX;
-                    loadResY = savedResY;
-                    loadResZ = savedResZ;
-                }
-                else
-                {
-                    Debug.LogWarning("[ExcavationManager] Detected legacy save format (no header). " +
-                        "Will attempt to load assuming current resolution. Re-save to upgrade.");
-                }
-
-                // Decompress voxel data
-                using var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress);
-                using var decompressed = new MemoryStream();
-                gzipStream.CopyTo(decompressed);
-                byte[] rawData = decompressed.ToArray();
-
-                int expectedSize = loadResX * loadResY * loadResZ * sizeof(float);
-                if (rawData.Length != expectedSize)
-                {
-                    // Try to infer resolution from data size for legacy files
-                    int voxelCount = rawData.Length / sizeof(float);
-                    Debug.LogError($"[ExcavationManager] Data size mismatch: " +
-                        $"expected {expectedSize} bytes ({loadResX}x{loadResY}x{loadResZ} = {loadResX * loadResY * loadResZ} voxels), " +
-                        $"got {rawData.Length} bytes ({voxelCount} voxels). " +
-                        (isLegacy ? "Legacy file was likely saved with different volume settings. " : "") +
-                        "Delete old save and re-save with current settings.");
-                    return;
-                }
-
-                float[] floatData = new float[loadResX * loadResY * loadResZ];
-                System.Buffer.BlockCopy(rawData, 0, floatData, 0, rawData.Length);
-
-                Texture3D temp = new Texture3D(loadResX, loadResY, loadResZ, TextureFormat.RFloat, false);
-                temp.SetPixelData(floatData, 0);
-                temp.Apply(false, false);
-
-                Graphics.CopyTexture(temp, carveVolume);
-                Destroy(temp);
-
-                RegenerateMips();
-
-                Debug.Log($"[ExcavationManager] Volume loaded ({loadResX}x{loadResY}x{loadResZ}, {fileData.Length} bytes on disk)");
+                File.WriteAllBytes(filePath, stream.ToArray());
+                Debug.Log($"[ExcavationManager] Saved {resolution.x}x{resolution.y}x{resolution.z} " +
+                    $"to: {filePath} ({stream.Length} bytes)");
             }
             catch (Exception e)
             {
-                Debug.LogError($"[ExcavationManager] Failed to load volume: {e.Message}\n{e.StackTrace}");
+                Debug.LogError($"[ExcavationManager] Save failed: {e.Message}\n{e.StackTrace}");
             }
         }
 
-        public void SaveExcavation(string filePath, Action<bool> callback = null)
-        {
-            SerializeVolumeAsync((data) =>
-            {
-                if (data == null) { callback?.Invoke(false); return; }
-                try
-                {
-                    File.WriteAllBytes(filePath, data);
-                    Debug.Log($"[ExcavationManager] Saved to: {filePath}");
-                    callback?.Invoke(true);
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"[ExcavationManager] Save failed: {e.Message}");
-                    callback?.Invoke(false);
-                }
-            });
-        }
-
+        /// <summary>
+        /// Load the volume from a file.
+        /// </summary>
         public bool LoadExcavation(string filePath)
         {
+            if (carveVolume == null)
+            {
+                Debug.LogError("[ExcavationManager] Cannot load: volume not initialized.");
+                return false;
+            }
+
+            if (!File.Exists(filePath))
+            {
+                Debug.LogError($"[ExcavationManager] File not found: {filePath}");
+                return false;
+            }
+
             try
             {
-                if (!File.Exists(filePath)) return false;
-                byte[] data = File.ReadAllBytes(filePath);
-                LoadVolume(data);
+                byte[] fileData = File.ReadAllBytes(filePath);
+                using var stream = new MemoryStream(fileData);
+                var br = new BinaryReader(stream);
+
+                int savedX = br.ReadInt32();
+                int savedY = br.ReadInt32();
+                int savedZ = br.ReadInt32();
+
+                if (savedX != resolution.x || savedY != resolution.y || savedZ != resolution.z)
+                {
+                    Debug.LogError($"[ExcavationManager] Resolution mismatch: " +
+                        $"file={savedX}x{savedY}x{savedZ}, volume={resolution.x}x{resolution.y}x{resolution.z}. " +
+                        $"Delete old save and re-save.");
+                    return false;
+                }
+
+                using var gz = new GZipStream(stream, CompressionMode.Decompress);
+                using var decompressed = new MemoryStream();
+                gz.CopyTo(decompressed);
+                byte[] rawData = decompressed.ToArray();
+
+                int expectedBytes = savedX * savedY * savedZ * sizeof(float);
+                if (rawData.Length != expectedBytes)
+                {
+                    Debug.LogError($"[ExcavationManager] Data size mismatch: " +
+                        $"expected {expectedBytes} bytes, got {rawData.Length}.");
+                    return false;
+                }
+
+                float[] floatData = new float[savedX * savedY * savedZ];
+                System.Buffer.BlockCopy(rawData, 0, floatData, 0, rawData.Length);
+
+                WriteVolumeToGPU(floatData);
+                RegenerateMips();
+
+                Debug.Log($"[ExcavationManager] Loaded {savedX}x{savedY}x{savedZ} from: {filePath}");
                 return true;
             }
             catch (Exception e)
             {
-                Debug.LogError($"[ExcavationManager] Load failed: {e.Message}");
+                Debug.LogError($"[ExcavationManager] Load failed: {e.Message}\n{e.StackTrace}");
                 return false;
             }
         }
