@@ -2,7 +2,6 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Excavation.Core;
 
 namespace Excavation.Stratigraphy
@@ -49,8 +48,8 @@ namespace Excavation.Stratigraphy
         private Action<float[]> pendingCallback;
 
         // Cached separated lists for material evaluation
-        private List<MaterialLayer> fills = new List<MaterialLayer>();
-        private List<MaterialLayer> bands = new List<MaterialLayer>();
+        private readonly List<MaterialLayer> fills = new();
+        private readonly List<MaterialLayer> bands = new();
 
         public List<MaterialLayer> Layers => layers;
         public float SurfaceY => surfaceY;
@@ -137,6 +136,11 @@ namespace Excavation.Stratigraphy
             }
 
             return defaultSubstrate;
+        }
+
+        void OnValidate()
+        {
+            InitializeLayers();
         }
 
         /// <summary>
